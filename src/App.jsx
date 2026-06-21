@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Obras from './pages/Obras'
 import Ata from './pages/Ata'
 import Dashboard from './pages/Dashboard'
+import Usuarios from './pages/Usuarios'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -27,6 +28,7 @@ function AppRoutes() {
       <Route path="/obras" element={<PrivateRoute><Obras /></PrivateRoute>} />
       <Route path="/ata/:obraId/:tipo" element={<PrivateRoute><Ata /></PrivateRoute>} />
       <Route path="/dashboard" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+      <Route path="/usuarios" element={<PrivateRoute><Usuarios /></PrivateRoute>} />
       <Route path="*" element={<Navigate to={user ? '/obras' : '/login'} replace />} />
     </Routes>
   )
