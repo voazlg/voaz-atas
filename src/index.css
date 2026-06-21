@@ -1,0 +1,78 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --green:      #07D48A;
+  --green-l:    #83DAB9;
+  --green-pale: #e8faf4;
+  --dark:       #2e2e2e;
+  --gray:       #6b7280;
+  --gray-light: #f3f4f6;
+  --border:     #e5e7eb;
+  --white:      #ffffff;
+  --font:       'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --s-concluido:     #d1fae5;
+  --t-concluido:     #065f46;
+  --s-em-andamento:  #dbeafe;
+  --t-em-andamento:  #1e40af;
+  --s-atrasado:      #fee2e2;
+  --t-atrasado:      #991b1b;
+  --s-alerta:        #fef3c7;
+  --t-alerta:        #92400e;
+  --s-monitoramento: #ede9fe;
+  --t-monitoramento: #5b21b6;
+}
+
+html, body, #root {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--gray-light);
+  color: var(--dark);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── SCROLLBAR SUTIL ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── BOTÕES BASE ── */
+button { font-family: var(--font); cursor: pointer; }
+input, select, textarea { font-family: var(--font); }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--dark);
+  color: var(--green);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 9999;
+  animation: toastIn .25s ease;
+  pointer-events: none;
+}
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ── STATUS BADGES ── */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.badge-CONCLUIDO     { background: var(--s-concluido);     color: var(--t-concluido); }
+.badge-EM_ANDAMENTO  { background: var(--s-em-andamento);  color: var(--t-em-andamento); }
+.badge-ATRASADO      { background: var(--s-atrasado);      color: var(--t-atrasado); }
+.badge-ALERTA        { background: var(--s-alerta);        color: var(--t-alerta); }
+.badge-MONITORAMENTO { background: var(--s-monitoramento); color: var(--t-monitoramento); }
