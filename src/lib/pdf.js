@@ -68,7 +68,7 @@ export function gerarPDF(obra, ata, grupos, tipo) {
       item.data_item ? new Date(item.data_item + 'T12:00:00').toLocaleDateString('pt-BR') : '',
       item.data_limite ? new Date(item.data_limite + 'T12:00:00').toLocaleDateString('pt-BR') : '',
       item.responsavel || '',
-      item.observacoes ? item.observacoes.split('\n').slice(-1)[0].substring(0, 80) : '',
+      item.observacoes || '',
       STATUS[item.status]?.label || item.status,
     ])
 
@@ -77,7 +77,7 @@ export function gerarPDF(obra, ata, grupos, tipo) {
       head: [['Assunto', 'Data item', 'Data limite', 'Responsável', 'Observações', 'Status']],
       body: rows,
       margin: { left: 10, right: 10 },
-      styles: { fontSize: 7, font: 'helvetica', cellPadding: 2, overflow: 'linebreak', valign: 'middle' },
+      styles: { fontSize: 6.5, font: 'helvetica', cellPadding: 2.5, overflow: 'linebreak', valign: 'top' },
       headStyles: { fillColor: LGRAY, textColor: GRAY, fontStyle: 'bold', fontSize: 6.5 },
       columnStyles: {
         0: { cellWidth: 60 },
