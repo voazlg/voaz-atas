@@ -252,14 +252,26 @@ export default function Ata() {
 
   // ── RESUMO / PDF ─────────────────────────────────────
   function gerarResumoTexto() {
-    const pendentes = []
+    const linhas = []
+    let totalPendentes = 0
+
     grupos.forEach(g => {
-      g.itens.filter(i => i.status !== 'CONCLUIDO').forEach(i => {
-        pendentes.push(
-          `[${STATUS[i.status]?.label || i.status}] ${i.assunto}` +
-          (i.responsavel ? ` | Resp: ${i.responsavel}` : '') +
-          (i.observacoes ? `\n  → ${i.observacoes.split('\n').slice(-1)[0]}` : '')
-        )
+      const itensPendentes = g.itens.filter(i => i.status !== 'CONCLUIDO')
+      if (itensPendentes.length === 0) return
+
+      // Cabeçalho do grupo
+      linhas.push('')
+      linhas.push(`📌 ${g.titulo.toUpperCase()}`)
+      linhas.push('─'.repeat(36))
+
+      itensPendentes.forEach(i => {
+        const status = STATUS[i.status]?.label || i.status
+        const resp = i.responsavel ? ` | ${i.responsavel}` : ''
+        const ultimaObs = i.observacoes
+          ? `\n     → ${i.observacoes.split('\n').slice(-1)[0]}`
+          : ''
+        linhas.push(`[${status}] ${i.assunto}${resp}${ultimaObs}`)
+        totalPendentes++
       })
     })
 
@@ -268,11 +280,11 @@ export default function Ata() {
       `${obra?.cliente} | ${obra?.nome}`,
       `Data: ${new Date(hoje).toLocaleDateString('pt-BR')}`,
       '',
-      `PENDÊNCIAS (${pendentes.length} itens):`,
-      '─'.repeat(40),
+      `PENDÊNCIAS (${totalPendentes} itens):`,
+      '═'.repeat(40),
     ].join('\n')
 
-    return header + '\n' + pendentes.join('\n\n')
+    return header + linhas.join('\n')
   }
 
   // ── CONTADORES ────────────────────────────────────────
