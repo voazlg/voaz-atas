@@ -96,6 +96,9 @@ export default function Obras() {
                 </div>
               </div>
               <div style={s.cardActions}>
+                <button style={s.btnHist} onClick={() => navigate(\`/historico/\${obra.id}\`)}>
+                  <i className="ti ti-history" /> Histórico
+                </button>
                 <button style={s.btnKick} onClick={() => abrirAta(obra.id, 'kickoff')}>
                   <i className="ti ti-rocket" /> Kickoff
                 </button>
@@ -165,7 +168,8 @@ const s = {
   cardCliente: { fontSize: 11, fontWeight: 700, color: '#07D48A', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 },
   cardNome: { fontSize: 16, fontWeight: 700, color: '#2e2e2e', marginBottom: 8 },
   cardMeta: { display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12, color: '#6b7280' },
-  cardActions: { borderTop: '1px solid #f3f4f6', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' },
+  cardActions: { borderTop: '1px solid #f3f4f6', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr' },
+  btnHist:  { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#6b7280', borderRight: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
   btnKick:  { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#92400e', borderRight: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
   btnInt:   { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#2e2e2e', borderRight: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
   btnExt:   { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#2e2e2e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },

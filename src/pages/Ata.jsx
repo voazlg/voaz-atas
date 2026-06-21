@@ -431,6 +431,11 @@ export default function Ata() {
         <div style={s.ataInfo}>
           <span style={s.ataCliente}>{obra.cliente}</span>
           <span style={s.ataNome}>{obra.nome}</span>
+          {ata.numero_reuniao && (
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', letterSpacing: '0.05em' }}>
+              #{String(ata.numero_reuniao).padStart(2,'0')}
+            </span>
+          )}
           <span style={{
             ...s.ataTipo,
             background: TIPOS_ATA[tipo]?.color || '#e5e7eb',
