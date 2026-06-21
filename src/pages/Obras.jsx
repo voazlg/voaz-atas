@@ -96,7 +96,7 @@ export default function Obras() {
                 </div>
               </div>
               <div style={s.cardActions}>
-                <button style={s.btnHist} onClick={() => navigate(\`/historico/\${obra.id}\`)}>
+                <button style={s.btnHist} onClick={() => navigate('/historico/' + obra.id)}>
                   <i className="ti ti-history" /> Histórico
                 </button>
                 <button style={s.btnKick} onClick={() => abrirAta(obra.id, 'kickoff')}>
