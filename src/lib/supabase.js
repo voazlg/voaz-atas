@@ -14,8 +14,114 @@ export const STATUS = {
   MONITORAMENTO: { label: 'Monitoramento', color: '#ede9fe', text: '#5b21b6' },
 }
 
+// ── TIPOS DE ATA ──────────────────────────────────────────
+export const TIPOS_ATA = {
+  kickoff:  { label: 'Kickoff Interno',      icon: 'ti-rocket',      color: '#fef3c7', text: '#92400e', alimentaDash: false },
+  interno:  { label: 'Checkpoint Interno',   icon: 'ti-lock',        color: '#e0e7ff', text: '#3730a3', alimentaDash: true  },
+  externo:  { label: 'Checkpoint Externo',   icon: 'ti-users',       color: '#dcfce7', text: '#166534', alimentaDash: true  },
+}
+
 // ── GRUPOS BASE POR TIPO ──────────────────────────────────
 export const GRUPOS_TEMPLATE = {
+  kickoff: [
+    {
+      titulo: 'Informações Gerais do Cliente',
+      itens: [
+        'Perfil do cliente',
+        'Modelo de negócio',
+        'Contrato / carta de intenções / formalização de início',
+        'Haverá PO? Já recebemos? Previsão?',
+        'Escopo',
+        'Resumo da proposta (apresentação)',
+        'Itens reaproveitados',
+        'Compras diretas do cliente',
+        'Confirmar se última revisão do projeto reflete planilha de custos',
+        'Gerenciadora externa?',
+        'Mockup e amostras',
+        'Definição equipe de obra / TST',
+        'Indicação de fornecedores',
+        'Cadastro de fornecedores',
+      ],
+    },
+    {
+      titulo: 'Requisitos Legais',
+      itens: [
+        'Análise da situação do imóvel',
+        'Informação de aprovação (impactos em projeto e cronograma)',
+        'Prefeitura',
+        'Necessidade de aprovação CONTRU, SEHAB, CET, CONPRESP, CONDEPHAT',
+        'Vendemos a FAT',
+        'Alvará e licença de funcionamento',
+        'Seguro — prazo de cobertura, valor mínimo e itens do cliente',
+        'ART / RRT Arquitetura',
+        'ART / RRT VOAZ',
+      ],
+    },
+    {
+      titulo: 'Budget e Orçamento',
+      itens: [
+        'Apresentação e análise do cronograma comercial',
+        'Estratégia de rentabilização do projeto',
+        'Créditos e débitos',
+      ],
+    },
+    {
+      titulo: 'Cronograma e Rotina Semanal',
+      itens: [
+        'Definir agenda de reunião semanal com o cliente',
+        'Definir agenda de checkpoint interno',
+        'Definição da data do kickoff externo',
+        'Agenda dos próximos passos internos',
+        'Apresentação e análise do cronograma comercial',
+      ],
+    },
+    {
+      titulo: 'Contratação dos Projetos Técnicos',
+      itens: [
+        'Elétrica',
+        'Luminotécnico',
+        'Ar condicionado',
+        'Hidráulica / SPK',
+        'Cabeamento de dados / voz / telecom',
+        'Bombeiro',
+        'Projeto estrutural',
+        'CFTV / controle de acesso',
+        'Comunicação visual',
+        'Acústica',
+        'Automação',
+        'Paisagismo',
+        'Cozinha industrial',
+        'LEED',
+        'Consultorias específicas',
+      ],
+    },
+    {
+      titulo: 'Aprovações Condomínio / Início de Obra',
+      itens: [
+        'Verificação de procedimento / protocolo do condomínio',
+        'Preparo do material necessário para entrada no condomínio',
+        'Projetos para entrada no prédio',
+      ],
+    },
+    {
+      titulo: 'Riscos do Projeto',
+      itens: [],
+    },
+    {
+      titulo: 'Cronograma de Compras',
+      itens: [
+        'Demolição',
+        'Lista de canteiro',
+        'Drywall',
+        'Elétrica',
+        'Ar condicionado',
+        'Divisórias',
+        'Luminária',
+        'Hidráulica',
+        'Papel de parede',
+      ],
+    },
+  ],
   interno: [
     {
       titulo: 'Arquitetura — Levantamentos',
