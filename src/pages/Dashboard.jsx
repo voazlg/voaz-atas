@@ -182,8 +182,13 @@ export default function Dashboard() {
                       <tr key={item.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
                         <td style={s.td}>{item.assunto}</td>
                         <td style={{ ...s.td, textAlign: 'center' }}>
-                          <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 12, background: item.tipo_ata === 'interno' ? '#e0e7ff' : '#dcfce7', color: item.tipo_ata === 'interno' ? '#3730a3' : '#166534' }}>
-                            {item.tipo_ata === 'interno' ? 'INT' : 'EXT'}
+                            <span style={{
+                            fontSize: 10, fontWeight: 800, padding: '3px 10px', borderRadius: 12,
+                            background: item.tipo_ata === 'interno' ? '#e0e7ff' : '#dcfce7',
+                            color: item.tipo_ata === 'interno' ? '#3730a3' : '#166534',
+                            letterSpacing: '0.05em',
+                          }}>
+                            {item.tipo_ata === 'interno' ? '🔒 INTERNO' : '👥 EXTERNO'}
                           </span>
                         </td>
                         <td style={s.td}>{item.responsavel || '—'}</td>

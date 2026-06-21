@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, TIPOS_ATA } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useToast } from '../hooks/useToast'
 
@@ -96,11 +96,14 @@ export default function Obras() {
                 </div>
               </div>
               <div style={s.cardActions}>
+                <button style={s.btnKick} onClick={() => abrirAta(obra.id, 'kickoff')}>
+                  <i className="ti ti-rocket" /> Kickoff
+                </button>
                 <button style={s.btnInt} onClick={() => abrirAta(obra.id, 'interno')}>
-                  <i className="ti ti-lock" /> Checkpoint interno
+                  <i className="ti ti-lock" /> CP Interno
                 </button>
                 <button style={s.btnExt} onClick={() => abrirAta(obra.id, 'externo')}>
-                  <i className="ti ti-users" /> Checkpoint externo
+                  <i className="ti ti-users" /> CP Externo
                 </button>
               </div>
             </div>
@@ -162,7 +165,8 @@ const s = {
   cardCliente: { fontSize: 11, fontWeight: 700, color: '#07D48A', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 2 },
   cardNome: { fontSize: 16, fontWeight: 700, color: '#2e2e2e', marginBottom: 8 },
   cardMeta: { display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 12, color: '#6b7280' },
-  cardActions: { borderTop: '1px solid #f3f4f6', display: 'grid', gridTemplateColumns: '1fr 1fr' },
+  cardActions: { borderTop: '1px solid #f3f4f6', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' },
+  btnKick:  { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#92400e', borderRight: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
   btnInt:   { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#2e2e2e', borderRight: '1px solid #f3f4f6', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
   btnExt:   { padding: '12px', background: 'none', border: 'none', fontSize: 12, fontWeight: 600, color: '#2e2e2e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 },
   overlay:  { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 },
