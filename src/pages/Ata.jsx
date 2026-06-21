@@ -28,6 +28,7 @@ export default function Ata() {
 
   // Modal de transferência
   const [transferModal, setTransferModal] = useState(null)
+  const [transferOutraAtaModal, setTransferOutraAtaModal] = useState(null)
 
   // Modal de resumo/PDF
   const [resumoModal, setResumoModal] = useState(false)
@@ -221,7 +222,7 @@ export default function Ata() {
     showToast('Observação salva')
   }
 
-  // ── TRANSFER ──────────────────────────────────────────
+  // ── TRANSFER (mesmo tipo de ata) ─────────────────────
   function openTransfer(grupoId, item) {
     setTransferModal({ grupoId, item })
   }
@@ -248,6 +249,79 @@ export default function Ata() {
       showToast('Item copiado para ' + grupos.find(g => g.id === destGrupoId)?.titulo)
     }
     setTransferModal(null)
+  }
+
+  // ── TRANSFER PARA OUTRA ATA (interno ↔ externo) ───────
+  async function doTransferOutraAta(item) {
+    const tipoDestino = tipo === 'interno' ? 'externo' : 'interno'
+
+    // Buscar ou criar ata do tipo destino para hoje
+    let { data: ataDestino } = await supabase
+      .from('atas')
+      .select('*')
+      .eq('obra_id', obraId)
+      .eq('tipo', tipoDestino)
+      .eq('data_reuniao', hoje)
+      .single()
+
+    if (!ataDestino) {
+      const { data: pmUser } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
+        .single()
+
+      const { data: novaAta } = await supabase.from('atas').insert({
+        obra_id: obraId,
+        tipo: tipoDestino,
+        data_reuniao: hoje,
+        created_by: pmUser?.id,
+      }).select().single()
+      ataDestino = novaAta
+
+      // Criar grupos do template na nova ata
+      if (ataDestino) {
+        const template = GRUPOS_TEMPLATE[tipoDestino] || []
+        for (let i = 0; i < template.length; i++) {
+          await supabase.from('grupos').insert({
+            ata_id: ataDestino.id,
+            titulo: template[i].titulo,
+            ordem: i,
+          })
+        }
+      }
+    }
+
+    if (!ataDestino) { showToast('Erro ao acessar ata destino'); return }
+
+    const { data: gruposDestino } = await supabase
+      .from('grupos')
+      .select('*')
+      .eq('ata_id', ataDestino.id)
+      .order('ordem')
+
+    setTransferModal(null)
+    setTransferOutraAtaModal({ item, ataDestino, gruposDestino: gruposDestino || [], tipoDestino })
+  }
+
+  async function confirmarTransferOutraAta(destGrupoId) {
+    if (!transferOutraAtaModal) return
+    const { item, ataDestino, tipoDestino } = transferOutraAtaModal
+
+    await supabase.from('itens').insert({
+      grupo_id: destGrupoId,
+      ata_id: ataDestino.id,
+      obra_id: obraId,
+      assunto: item.assunto,
+      data_item: hoje,
+      responsavel: item.responsavel,
+      observacoes: item.observacoes,
+      status: item.status,
+      ordem: 99,
+    })
+
+    showToast(`Item enviado para o Checkpoint ${tipoDestino === 'interno' ? 'Interno' : 'Externo'} ✓`)
+    setTransferOutraAtaModal(null)
   }
 
   // ── RESUMO / PDF ─────────────────────────────────────
@@ -467,24 +541,71 @@ export default function Ata() {
       {/* ══ MODAL: TRANSFER ══ */}
       {transferModal && (
         <div style={s.overlay}>
-          <div style={{ ...s.modal, maxWidth: 360 }}>
+          <div style={{ ...s.modal, maxWidth: 380 }}>
             <div style={s.modalHeader}>
-              <span style={s.modalTitle}>Copiar para qual grupo?</span>
+              <span style={s.modalTitle}>Copiar item para...</span>
               <button style={s.btnClose} onClick={() => setTransferModal(null)}>
                 <i className="ti ti-x" />
               </button>
             </div>
-            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
               "{transferModal.item.assunto?.substring(0, 50)}"
             </p>
-            {grupos
-              .filter(g => g.id !== transferModal.grupoId)
-              .map(g => (
-                <button key={g.id} style={s.transferBtn} onClick={() => doTransfer(g.id)}>
-                  {g.titulo}
-                </button>
-              ))}
-            <button style={s.btnCancel} onClick={() => setTransferModal(null)}>Cancelar</button>
+
+            {/* Botão para outra ata */}
+            <div style={{ marginBottom: 16 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Outra ata
+              </p>
+              <button
+                style={{ ...s.transferBtn, background: tipo === 'interno' ? '#dcfce7' : '#e0e7ff', borderColor: tipo === 'interno' ? '#86efac' : '#a5b4fc', color: tipo === 'interno' ? '#166534' : '#3730a3', fontWeight: 700 }}
+                onClick={() => doTransferOutraAta(transferModal.item)}
+              >
+                <i className={`ti ti-${tipo === 'interno' ? 'users' : 'lock'}`} />
+                Enviar para Checkpoint {tipo === 'interno' ? 'Externo' : 'Interno'}
+              </button>
+            </div>
+
+            {/* Grupos da mesma ata */}
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Outro grupo desta ata
+              </p>
+              {grupos
+                .filter(g => g.id !== transferModal.grupoId)
+                .map(g => (
+                  <button key={g.id} style={s.transferBtn} onClick={() => doTransfer(g.id)}>
+                    {g.titulo}
+                  </button>
+                ))}
+            </div>
+
+            <button style={{ ...s.btnCancel, marginTop: 12, width: '100%' }} onClick={() => setTransferModal(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {/* ══ MODAL: TRANSFER OUTRA ATA ══ */}
+      {transferOutraAtaModal && (
+        <div style={s.overlay}>
+          <div style={{ ...s.modal, maxWidth: 380 }}>
+            <div style={s.modalHeader}>
+              <span style={s.modalTitle}>
+                Checkpoint {transferOutraAtaModal.tipoDestino === 'interno' ? 'Interno' : 'Externo'} — qual grupo?
+              </span>
+              <button style={s.btnClose} onClick={() => setTransferOutraAtaModal(null)}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
+            <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
+              "{transferOutraAtaModal.item.assunto?.substring(0, 50)}"
+            </p>
+            {transferOutraAtaModal.gruposDestino.map(g => (
+              <button key={g.id} style={s.transferBtn} onClick={() => confirmarTransferOutraAta(g.id)}>
+                {g.titulo}
+              </button>
+            ))}
+            <button style={{ ...s.btnCancel, marginTop: 8, width: '100%' }} onClick={() => setTransferOutraAtaModal(null)}>Cancelar</button>
           </div>
         </div>
       )}
