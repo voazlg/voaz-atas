@@ -64,17 +64,29 @@ export default function Ata() {
       return
     }
 
-    // Pegar ata do dia
-    let { data: ataData } = await supabase
+    // Buscar a ata mais recente (maior número) desta obra+tipo
+    const { data: atasExistentes } = await supabase
       .from('atas')
       .select('*')
       .eq('obra_id', obraId)
       .eq('tipo', tipo)
-      .eq('data_reuniao', hoje)
-      .single()
+      .order('numero_reuniao', { ascending: false })
+      .limit(1)
+
+    const ataUltima = atasExistentes?.[0] || null
+
+    // Verificar se já existe uma ata criada hoje (mesmo dia)
+    const ataDoDia = ataUltima?.data_reuniao === hoje ? ataUltima : null
+
+    let ataData = ataDoDia
 
     if (!ataData) {
-      const { data: pm } = await supabase.from('usuarios').select('id').eq('auth_id', (await supabase.auth.getUser()).data.user.id).single()
+      // Não tem ata de hoje — criar nova
+      const { data: pm } = await supabase
+        .from('usuarios').select('id')
+        .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
+        .single()
+
       const { data: nova } = await supabase.from('atas').insert({
         obra_id: obraId,
         tipo,
@@ -84,22 +96,11 @@ export default function Ata() {
       ataData = nova
 
       if (ataData) {
-        // Buscar ata anterior da mesma obra e tipo
-        const { data: ataAnterior } = await supabase
-          .from('atas')
-          .select('*')
-          .eq('obra_id', obraId)
-          .eq('tipo', tipo)
-          .neq('id', ataData.id)
-          .order('data_reuniao', { ascending: false })
-          .limit(1)
-          .single()
-
-        if (ataAnterior) {
-          // Copiar grupos e itens da ata anterior — itens não concluídos + todos os grupos
-          await copiarDaAtaAnterior(ataData.id, ataAnterior.id)
+        if (ataUltima) {
+          // Copiar da ata anterior (maior número)
+          await copiarDaAtaAnterior(ataData.id, ataUltima.id)
         } else {
-          // Primeira ata — carregar do template
+          // Primeira ata desta obra — usar template
           await criarGruposTemplate(ataData.id)
         }
       }
