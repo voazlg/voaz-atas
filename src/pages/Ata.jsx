@@ -51,7 +51,20 @@ export default function Ata() {
       .order('nome')
     setResponsaveis(resps || [])
 
-    // Pegar ou criar ata do dia
+    // Se veio com ?ata=ID na URL, abrir ata específica do histórico
+    const params = new URLSearchParams(window.location.search)
+    const ataIdParam = params.get('ata')
+
+    if (ataIdParam) {
+      const { data: ataEspecifica } = await supabase
+        .from('atas').select('*').eq('id', ataIdParam).single()
+      setAta(ataEspecifica)
+      if (ataEspecifica) await loadGrupos(ataEspecifica.id)
+      setLoading(false)
+      return
+    }
+
+    // Pegar ata do dia
     let { data: ataData } = await supabase
       .from('atas')
       .select('*')
@@ -70,14 +83,69 @@ export default function Ata() {
       }).select().single()
       ataData = nova
 
-      // Criar grupos e itens do template
-      if (ataData) await criarGruposTemplate(ataData.id)
+      if (ataData) {
+        // Buscar ata anterior da mesma obra e tipo
+        const { data: ataAnterior } = await supabase
+          .from('atas')
+          .select('*')
+          .eq('obra_id', obraId)
+          .eq('tipo', tipo)
+          .neq('id', ataData.id)
+          .order('data_reuniao', { ascending: false })
+          .limit(1)
+          .single()
+
+        if (ataAnterior) {
+          // Copiar grupos e itens da ata anterior — itens não concluídos + todos os grupos
+          await copiarDaAtaAnterior(ataData.id, ataAnterior.id)
+        } else {
+          // Primeira ata — carregar do template
+          await criarGruposTemplate(ataData.id)
+        }
+      }
     }
 
     setAta(ataData)
     if (ataData) await loadGrupos(ataData.id)
 
     setLoading(false)
+  }
+
+  async function copiarDaAtaAnterior(novaAtaId, ataAnteriorId) {
+    // Buscar grupos e itens da ata anterior
+    const { data: gruposAnt } = await supabase
+      .from('grupos')
+      .select('*, itens(*)')
+      .eq('ata_id', ataAnteriorId)
+      .order('ordem')
+
+    if (!gruposAnt) return
+
+    for (let gi = 0; gi < gruposAnt.length; gi++) {
+      const ga = gruposAnt[gi]
+      const { data: novoGrupo } = await supabase.from('grupos').insert({
+        ata_id: novaAtaId,
+        titulo: ga.titulo,
+        ordem: ga.ordem,
+      }).select().single()
+
+      if (novoGrupo && ga.itens?.length > 0) {
+        // Copiar TODOS os itens — concluídos e pendentes — mantendo histórico completo
+        const itensParaCopiar = ga.itens.map(item => ({
+          grupo_id: novoGrupo.id,
+          ata_id: novaAtaId,
+          obra_id: obraId,
+          assunto: item.assunto,
+          data_item: hoje,
+          data_limite: item.data_limite,
+          responsavel: item.responsavel,
+          observacoes: item.observacoes,
+          status: item.status === 'CONCLUIDO' ? 'CONCLUIDO' : item.status,
+          ordem: item.ordem,
+        }))
+        await supabase.from('itens').insert(itensParaCopiar)
+      }
+    }
   }
 
   async function criarGruposTemplate(ataId) {

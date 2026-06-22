@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { TIPOS_ATA } from '../lib/supabase'
+import { useToast } from '../hooks/useToast'
 
 export default function Historico() {
   const { obraId } = useParams()
@@ -11,6 +12,8 @@ export default function Historico() {
   const [atas, setAtas]     = useState([])
   const [loading, setLoading] = useState(true)
   const [filtroTipo, setFiltroTipo] = useState('todos')
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const { showToast, ToastContainer } = useToast()
 
   useEffect(() => { load() }, [obraId])
 
@@ -28,6 +31,20 @@ export default function Historico() {
     setLoading(false)
   }
 
+  async function deletarAta(ataId) {
+    // Deletar em cascata: itens → grupos → ata
+    const { data: grupos } = await supabase.from('grupos').select('id').eq('ata_id', ataId)
+    if (grupos?.length) {
+      const grupoIds = grupos.map(g => g.id)
+      await supabase.from('itens').delete().in('grupo_id', grupoIds)
+      await supabase.from('grupos').delete().in('id', grupoIds)
+    }
+    await supabase.from('atas').delete().eq('id', ataId)
+    setConfirmDelete(null)
+    showToast('Ata deletada')
+    load()
+  }
+
   const atasFiltradas = atas.filter(a => filtroTipo === 'todos' || a.tipo === filtroTipo)
 
   function calcStats(ata) {
@@ -41,6 +58,7 @@ export default function Historico() {
 
   return (
     <div style={s.page}>
+      <ToastContainer />
       <div style={s.topBar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button style={s.btnBack} onClick={() => navigate('/obras')}>
@@ -93,11 +111,43 @@ export default function Historico() {
                 <div style={s.cardStats}>
                   {st.atrasados > 0 && <span style={s.statChip('fee2e2','991b1b')}>⚠ {st.atrasados}</span>}
                   {st.alertas   > 0 && <span style={s.statChip('fef3c7','92400e')}>🔶 {st.alertas}</span>}
+                  <button
+                    style={s.btnDel}
+                    onClick={e => { e.stopPropagation(); setConfirmDelete(ata) }}
+                    title="Deletar ata"
+                  >
+                    <i className="ti ti-trash" />
+                  </button>
                   <i className="ti ti-chevron-right" style={{ color: '#d1d5db', fontSize: 18 }} />
                 </div>
               </div>
             )
           })}
+        </div>
+      )}
+      {/* Modal confirmação delete */}
+      {confirmDelete && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 24, width: '100%', maxWidth: 400 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Deletar ata?</div>
+            <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 20, lineHeight: 1.5 }}>
+              Você está prestes a deletar a ata <strong>#{String(confirmDelete.numero_reuniao || 1).padStart(2,'0')}</strong> de <strong>{new Date(confirmDelete.data_reuniao + 'T12:00:00').toLocaleDateString('pt-BR')}</strong>. Todos os itens e observações serão perdidos permanentemente.
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                style={{ flex: 1, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                onClick={() => deletarAta(confirmDelete.id)}
+              >
+                Sim, deletar
+              </button>
+              <button
+                style={{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer', color: '#6b7280' }}
+                onClick={() => setConfirmDelete(null)}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -124,4 +174,5 @@ const s = {
   progressLabel:{ fontSize: 11, color: '#6b7280' },
   cardStats:{ display: 'flex', alignItems: 'center', gap: 8 },
   statChip: (bg, color) => ({ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 12, background: `#${bg}`, color: `#${color}` }),
+  btnDel:   { background: 'none', border: 'none', color: '#d1d5db', fontSize: 16, cursor: 'pointer', padding: '2px 6px', borderRadius: 6, display: 'flex', alignItems: 'center' },
 }
