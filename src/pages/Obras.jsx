@@ -47,8 +47,32 @@ export default function Obras() {
     setSaving(false)
   }
 
-  function abrirAta(obraId, tipo) {
-    navigate(`/ata/${obraId}/${tipo}`)
+  async function abrirAta(obraId, tipo) {
+    if (tipo === 'kickoff') {
+      navigate('/ata/' + obraId + '/' + tipo)
+      return
+    }
+    setLoadingAta(true)
+    // Buscar ata mais recente desta obra+tipo
+    const { data: atas } = await supabase
+      .from('atas')
+      .select('id, data_reuniao, numero_reuniao, tipo')
+      .eq('obra_id', obraId)
+      .eq('tipo', tipo)
+      .order('numero_reuniao', { ascending: false })
+      .limit(1)
+
+    setLoadingAta(false)
+    const ultimaAta = atas?.[0] || null
+
+    if (!ultimaAta) {
+      // Primeira ata — vai direto
+      navigate('/ata/' + obraId + '/' + tipo)
+      return
+    }
+
+    // Tem ata anterior — pergunta o que fazer
+    setModalAta({ obraId, tipo, ultimaAta })
   }
 
   const statusColors = {
@@ -149,6 +173,63 @@ export default function Obras() {
           </div>
         </div>
       )}
+      {/* Modal escolha de ata */}
+      {modalAta && (
+        <div style={s.overlay}>
+          <div style={{ ...s.modal, maxWidth: 420 }}>
+            <div style={s.modalHeader}>
+              <span style={s.modalTitle}>
+                {modalAta.tipo === 'interno' ? 'Checkpoint Interno' : 'Checkpoint Externo'} — {modalAta.ultimaAta && (() => {
+                  const o = obras.find(x => x.id === modalAta.obraId)
+                  return o ? o.cliente : ''
+                })()}
+              </span>
+              <button style={s.btnClose} onClick={() => setModalAta(null)}>
+                <i className="ti ti-x" />
+              </button>
+            </div>
+
+            <div style={{ background: '#f9fafb', borderRadius: 8, padding: '12px 16px', marginBottom: 20, fontSize: 13, color: '#6b7280' }}>
+              Existe uma ata <strong>#{String(modalAta.ultimaAta.numero_reuniao || 1).padStart(2,'0')}</strong> de <strong>{new Date(modalAta.ultimaAta.data_reuniao + 'T12:00:00').toLocaleDateString('pt-BR')}</strong>. O que deseja fazer?
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <button
+                style={s.btnOpcao}
+                onClick={() => {
+                  setModalAta(null)
+                  navigate('/ata/' + modalAta.obraId + '/' + modalAta.tipo + '?ata=' + modalAta.ultimaAta.id)
+                }}
+              >
+                <div style={s.btnOpcaoIcon}><i className="ti ti-pencil" /></div>
+                <div>
+                  <div style={s.btnOpcaoTitle}>Editar ata atual</div>
+                  <div style={s.btnOpcaoSub}>Abrir e editar a ata #{String(modalAta.ultimaAta.numero_reuniao || 1).padStart(2,'0')} existente</div>
+                </div>
+              </button>
+
+              <button
+                style={{ ...s.btnOpcao, borderColor: '#07D48A' }}
+                onClick={() => {
+                  setModalAta(null)
+                  navigate('/ata/' + modalAta.obraId + '/' + modalAta.tipo)
+                }}
+              >
+                <div style={{ ...s.btnOpcaoIcon, background: '#e8faf4', color: '#07D48A' }}><i className="ti ti-plus" /></div>
+                <div>
+                  <div style={s.btnOpcaoTitle}>Nova reunião</div>
+                  <div style={s.btnOpcaoSub}>Criar ata #{String((modalAta.ultimaAta.numero_reuniao || 1) + 1).padStart(2,'0')} copiando os itens da anterior</div>
+                </div>
+              </button>
+            </div>
+
+            <button style={{ ...s.btnCancel, marginTop: 16, width: '100%' }} onClick={() => setModalAta(null)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
@@ -182,4 +263,9 @@ const s = {
   label:    { display: 'block', fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 },
   input:    { width: '100%', border: '1px solid #e5e7eb', borderRadius: 8, padding: '9px 12px', fontSize: 14, outline: 'none', color: '#2e2e2e' },
   btnSave:  { background: '#07D48A', color: '#fff', border: 'none', borderRadius: 8, padding: '12px', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginTop: 4 },
+  btnCancel:{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer', color: '#6b7280', fontFamily: 'Inter, sans-serif' },
+  btnOpcao: { display: 'flex', alignItems: 'center', gap: 14, width: '100%', padding: '14px 16px', border: '1.5px solid #e5e7eb', borderRadius: 10, background: '#fff', cursor: 'pointer', textAlign: 'left', fontFamily: 'Inter, sans-serif', transition: 'border-color .15s' },
+  btnOpcaoIcon: { width: 38, height: 38, borderRadius: 8, background: '#f3f4f6', color: '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 },
+  btnOpcaoTitle: { fontSize: 14, fontWeight: 700, color: '#2e2e2e', marginBottom: 2 },
+  btnOpcaoSub:   { fontSize: 12, color: '#6b7280' },
 }

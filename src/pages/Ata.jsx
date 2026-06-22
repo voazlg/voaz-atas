@@ -64,7 +64,8 @@ export default function Ata() {
       return
     }
 
-    // Buscar a ata mais recente (maior número) desta obra+tipo
+    // Sem ?ata= na URL significa "nova reunião" — sempre cria nova ata
+    // Buscar a ata de maior número para copiar
     const { data: atasExistentes } = await supabase
       .from('atas')
       .select('*')
@@ -75,34 +76,26 @@ export default function Ata() {
 
     const ataUltima = atasExistentes?.[0] || null
 
-    // Verificar se já existe uma ata criada hoje (mesmo dia)
-    const ataDoDia = ataUltima?.data_reuniao === hoje ? ataUltima : null
+    const { data: pm } = await supabase
+      .from('usuarios').select('id')
+      .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
+      .single()
 
-    let ataData = ataDoDia
+    const { data: nova } = await supabase.from('atas').insert({
+      obra_id: obraId,
+      tipo,
+      data_reuniao: hoje,
+      created_by: pm?.id,
+    }).select().single()
+    let ataData = nova
 
-    if (!ataData) {
-      // Não tem ata de hoje — criar nova
-      const { data: pm } = await supabase
-        .from('usuarios').select('id')
-        .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
-        .single()
-
-      const { data: nova } = await supabase.from('atas').insert({
-        obra_id: obraId,
-        tipo,
-        data_reuniao: hoje,
-        created_by: pm?.id,
-      }).select().single()
-      ataData = nova
-
-      if (ataData) {
-        if (ataUltima) {
-          // Copiar da ata anterior (maior número)
-          await copiarDaAtaAnterior(ataData.id, ataUltima.id)
-        } else {
-          // Primeira ata desta obra — usar template
-          await criarGruposTemplate(ataData.id)
-        }
+    if (ataData) {
+      if (ataUltima) {
+        // Copiar grupos e itens da ata anterior
+        await copiarDaAtaAnterior(ataData.id, ataUltima.id)
+      } else {
+        // Primeira ata desta obra — usar template
+        await criarGruposTemplate(ataData.id)
       }
     }
 
