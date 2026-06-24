@@ -50,6 +50,9 @@ export function Header() {
             <span style={s.userRole}>{perfil.role === 'socio' ? 'Sócio' : 'PM'}</span>
           </div>
         )}
+        <button style={s.signOut} onClick={() => navigate('/perfil')} title="Minha conta">
+          <i className="ti ti-user-circle" />
+        </button>
         <button style={s.signOut} onClick={signOut} title="Sair">
           <i className="ti ti-logout" />
         </button>
