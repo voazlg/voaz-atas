@@ -1,22 +1,33 @@
+// ── Header.jsx ──
+// Alterações:
+// 1. Clique no logo volta para a hub (/) em vez de /obras
+// 2. Breadcrumb: VOAZ › Check Point Semanal
+// 3. is_admin continua funcionando (vem do useAuth adaptado)
+
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { LogoVOAZ } from './LogoVOAZ'
 
 export function Header() {
   const { perfil, signOut } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
-  const isAtaPage = location.pathname.startsWith('/ata')
-  const isDash    = location.pathname === '/dashboard'
+  const isDash = location.pathname === '/dashboard'
 
   return (
     <header style={s.header}>
-      <div style={s.left} onClick={() => navigate('/obras')} role="button">
-        <LogoVOAZ size={34} />
+      {/* Logo — clica e volta para a hub */}
+      <div style={s.left} onClick={() => window.location.href = '/'} role="button" title="Voltar à hub VOAZ">
+        <img
+          src="/logo-voaz-white.jpg"
+          alt="VOAZ"
+          width={32}
+          height={32}
+          style={{ objectFit: 'contain', display: 'block' }}
+        />
         <div>
           <div style={s.brand}>VOAZ</div>
-          <div style={s.sub}>Checkpoint Semanal</div>
+          <div style={s.sub}>Check Point Semanal</div>
         </div>
       </div>
 
@@ -47,7 +58,9 @@ export function Header() {
         {perfil && (
           <div style={s.userPill}>
             <span style={s.userName}>{perfil.nome}</span>
-            <span style={s.userRole}>{perfil.role === 'socio' ? 'Sócio' : 'PM'}</span>
+            <span style={s.userRole}>
+              {perfil.role === 'pmo' ? 'PMO / Sócio' : perfil.role === 'engenheiro' ? 'Engenheiro' : perfil.role === 'mestre' ? 'Mestre' : 'Compras'}
+            </span>
           </div>
         )}
         <button style={s.signOut} onClick={() => navigate('/perfil')} title="Minha conta">
@@ -94,11 +107,7 @@ const s = {
     letterSpacing: '0.05em',
     textTransform: 'uppercase',
   },
-  nav: {
-    display: 'flex',
-    gap: 4,
-    flex: 1,
-  },
+  nav: { display: 'flex', gap: 4, flex: 1 },
   navBtn: {
     background: 'none',
     border: 'none',
@@ -113,34 +122,11 @@ const s = {
     transition: 'all .15s',
     cursor: 'pointer',
   },
-  navActive: {
-    background: 'rgba(7,212,138,0.15)',
-    color: '#07D48A',
-  },
-  right: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    marginLeft: 'auto',
-  },
-  userPill: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'flex-end',
-  },
-  userName: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: '#fff',
-    lineHeight: 1,
-  },
-  userRole: {
-    fontSize: 10,
-    color: '#07D48A',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-    letterSpacing: '0.05em',
-  },
+  navActive: { background: 'rgba(7,212,138,0.15)', color: '#07D48A' },
+  right: { display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto' },
+  userPill: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end' },
+  userName: { fontSize: 13, fontWeight: 600, color: '#fff', lineHeight: 1 },
+  userRole: { fontSize: 10, color: '#07D48A', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' },
   signOut: {
     background: 'none',
     border: '1px solid rgba(255,255,255,0.15)',
