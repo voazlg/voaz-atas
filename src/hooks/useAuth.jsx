@@ -1,3 +1,7 @@
+// ── useAuth.jsx ──
+// Adaptado para usar tabela "perfis" do Supabase central
+// em vez de "usuarios" com auth_id separado
+
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 
@@ -19,6 +23,7 @@ export function AuthProvider({ children }) {
       setUser(session?.user ?? null)
       if (session?.user) loadPerfil(session.user.id)
       else { setPerfil(null); setLoading(false) }
+
       // Redireciona para perfil quando vem de link de reset de senha
       if (event === 'PASSWORD_RECOVERY') {
         window.location.href = '/perfil'
@@ -28,13 +33,25 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  async function loadPerfil(authId) {
+  async function loadPerfil(userId) {
+    // Central usa id = auth.uid() diretamente na tabela perfis
     const { data } = await supabase
-      .from('usuarios')
+      .from('perfis')
       .select('*')
-      .eq('auth_id', authId)
+      .eq('id', userId)
       .single()
-    setPerfil(data)
+
+    // Adapta o perfil para manter compatibilidade com o Check Point:
+    // - is_admin = true quando role é 'pmo'
+    // - nome e role existem em ambos
+    if (data) {
+      setPerfil({
+        ...data,
+        auth_id: userId,           // compatibilidade com código existente
+        is_admin: data.role === 'pmo',
+      })
+    }
+
     setLoading(false)
   }
 
@@ -45,6 +62,8 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     await supabase.auth.signOut()
+    // Volta para a hub após sair
+    window.location.href = '/'
   }
 
   return (
