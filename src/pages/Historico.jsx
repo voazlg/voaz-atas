@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
-import { TIPOS_ATA } from '../lib/supabase'
+import { supabase, TIPOS_ATA } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
 
 export default function Historico() {
@@ -9,56 +8,56 @@ export default function Historico() {
   const navigate = useNavigate()
   const { showToast, ToastContainer } = useToast()
 
-  const [obra, setObra]               = useState(null)
-  const [atas, setAtas]               = useState([])
-  const [loading, setLoading]         = useState(true)
-  const [filtroTipo, setFiltroTipo]   = useState('todos')
+  const [obra, setObra]             = useState(null)
+  const [obraMeta, setObraMeta]     = useState(null)
+  const [atas, setAtas]             = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [filtroTipo, setFiltroTipo] = useState('todos')
   const [verArquivadas, setVerArquivadas] = useState(false)
 
-  // Modais
-  const [modalArquivar, setModalArquivar]   = useState(null) // ata a arquivar
-  const [modalExcluir, setModalExcluir]     = useState(null) // ata a excluir definitivamente
-  const [textoConfirm, setTextoConfirm]     = useState('')
+  const [modalArquivar, setModalArquivar] = useState(null)
+  const [modalExcluir, setModalExcluir]   = useState(null)
+  const [textoConfirm, setTextoConfirm]   = useState('')
 
   useEffect(() => { load() }, [obraId])
 
   async function load() {
     setLoading(true)
-    const [{ data: o }, { data: a }] = await Promise.all([
+    const [{ data: o }, { data: m }, { data: a }] = await Promise.all([
       supabase.from('obras').select('*').eq('id', obraId).single(),
-      supabase.from('atas')
-        .select('*, grupos(id, itens(id, status))')
+      supabase.from('cp_obras_meta').select('*').eq('obra_id', obraId).single(),
+      supabase.from('cp_atas')
+        .select('*, cp_grupos(id, cp_itens(id, status))')
         .eq('obra_id', obraId)
         .order('numero_reuniao', { ascending: false }),
     ])
     setObra(o)
+    setObraMeta(m)
     setAtas(a || [])
     setLoading(false)
   }
 
-  // ── ARQUIVAR (soft delete) ─────────────────────────────
   async function arquivarAta(ata) {
-    await supabase.from('atas').update({ arquivada: true }).eq('id', ata.id)
+    await supabase.from('cp_atas').update({ arquivada: true }).eq('id', ata.id)
     showToast('Ata arquivada — pode ser restaurada a qualquer momento')
     setModalArquivar(null)
     load()
   }
 
-  // ── RESTAURAR ─────────────────────────────────────────
   async function restaurarAta(ataId) {
-    await supabase.from('atas').update({ arquivada: false }).eq('id', ataId)
+    await supabase.from('cp_atas').update({ arquivada: false }).eq('id', ataId)
     showToast('Ata restaurada ✓')
     load()
   }
 
-  // ── EXCLUIR DEFINITIVAMENTE ───────────────────────────
   async function excluirDefinitivo(ata) {
-    const { data: grupos } = await supabase.from('grupos').select('id').eq('ata_id', ata.id)
+    const { data: grupos } = await supabase
+      .from('cp_grupos').select('id').eq('ata_id', ata.id)
     if (grupos?.length) {
-      await supabase.from('itens').delete().in('grupo_id', grupos.map(g => g.id))
-      await supabase.from('grupos').delete().in('id', grupos.map(g => g.id))
+      await supabase.from('cp_itens').delete().in('grupo_id', grupos.map(g => g.id))
+      await supabase.from('cp_grupos').delete().in('id', grupos.map(g => g.id))
     }
-    await supabase.from('atas').delete().eq('id', ata.id)
+    await supabase.from('cp_atas').delete().eq('id', ata.id)
     showToast('Ata excluída permanentemente')
     setModalExcluir(null)
     setTextoConfirm('')
@@ -66,9 +65,10 @@ export default function Historico() {
   }
 
   function calcStats(ata) {
-    const itens = ata.grupos?.flatMap(g => g.itens) || []
+    // cp_grupos retorna cp_itens como subchave
+    const itens = ata.cp_grupos?.flatMap(g => g.cp_itens) || []
     return {
-      total:     itens.length,
+      total:      itens.length,
       concluidos: itens.filter(i => i.status === 'CONCLUIDO').length,
       atrasados:  itens.filter(i => i.status === 'ATRASADO').length,
       alertas:    itens.filter(i => i.status === 'ALERTA').length,
@@ -80,9 +80,8 @@ export default function Historico() {
   const atasFiltradas  = (verArquivadas ? atasArquivadas : atasAtivas)
     .filter(a => filtroTipo === 'todos' || a.tipo === filtroTipo)
 
-  // Label de confirmação para exclusão definitiva
   function labelConfirm(ata) {
-    return `#${String(ata.numero_reuniao || 1).padStart(2,'0')}`
+    return `#${String(ata.numero_reuniao || 1).padStart(2, '0')}`
   }
 
   return (
@@ -95,12 +94,12 @@ export default function Historico() {
             <i className="ti ti-arrow-left" />
           </button>
           <div>
-            <h1 style={s.h1}>{obra?.cliente} — {obra?.nome}</h1>
+            <h1 style={s.h1}>{obraMeta?.cliente || obra?.nome} — {obra?.nome}</h1>
             <p style={s.sub}>Histórico de reuniões</p>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {['todos','kickoff','interno','externo'].map(t => (
+          {['todos', 'kickoff', 'interno', 'externo'].map(t => (
             <button key={t}
               style={{ ...s.filterBtn, ...(filtroTipo === t ? s.filterBtnActive : {}) }}
               onClick={() => setFiltroTipo(t)}
@@ -111,10 +110,9 @@ export default function Historico() {
         </div>
       </div>
 
-      {/* Toggle ativas / arquivadas */}
       <div style={s.toggleRow}>
         <button
-          style={{ ...s.toggleBtn, ...(! verArquivadas ? s.toggleBtnActive : {}) }}
+          style={{ ...s.toggleBtn, ...(!verArquivadas ? s.toggleBtnActive : {}) }}
           onClick={() => setVerArquivadas(false)}
         >
           Ativas ({atasAtivas.length})
@@ -144,7 +142,7 @@ export default function Historico() {
               <p>{verArquivadas ? 'Nenhuma ata arquivada.' : 'Nenhuma ata encontrada.'}</p>
             </div>
           ) : atasFiltradas.map(ata => {
-            const st   = calcStats(ata)
+            const st  = calcStats(ata)
             const tipo = TIPOS_ATA[ata.tipo]
             const pct  = st.total ? Math.round(st.concluidos / st.total * 100) : 0
 
@@ -159,28 +157,28 @@ export default function Historico() {
                       <span style={{ ...s.tipoBadge, background: tipo?.color, color: tipo?.text }}>
                         <i className={`ti ${tipo?.icon}`} /> {tipo?.label}
                       </span>
-                      <span style={s.numReuniao}>#{String(ata.numero_reuniao || 1).padStart(2,'0')}</span>
+                      <span style={s.numReuniao}>#{String(ata.numero_reuniao || 1).padStart(2, '0')}</span>
                       {ata.arquivada && (
                         <span style={s.archiveBadge}><i className="ti ti-archive" /> Arquivada</span>
                       )}
                     </div>
                     <div style={s.dataAta}>
-                      {new Date(ata.data_reuniao + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                      {new Date(ata.data_reuniao + 'T12:00:00').toLocaleDateString('pt-BR', {
+                        weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+                      })}
                     </div>
                     <div style={s.progressBar}>
                       <div style={{ ...s.progressFill, width: `${pct}%` }} />
                     </div>
                     <div style={s.progressLabel}>{st.concluidos}/{st.total} itens concluídos ({pct}%)</div>
                   </div>
-
                   <div style={s.cardStats}>
-                    {st.atrasados > 0 && <span style={s.statChip('#fee2e2','#991b1b')}>⚠ {st.atrasados}</span>}
-                    {st.alertas   > 0 && <span style={s.statChip('#fef3c7','#92400e')}>🔶 {st.alertas}</span>}
+                    {st.atrasados > 0 && <span style={s.statChip('#fee2e2', '#991b1b')}>⚠ {st.atrasados}</span>}
+                    {st.alertas   > 0 && <span style={s.statChip('#fef3c7', '#92400e')}>🔶 {st.alertas}</span>}
                     {!ata.arquivada && <i className="ti ti-chevron-right" style={{ color: '#d1d5db', fontSize: 18 }} />}
                   </div>
                 </div>
 
-                {/* Ações */}
                 <div style={s.cardActions}>
                   {!ata.arquivada ? (
                     <button style={s.btnArquivar} onClick={() => setModalArquivar(ata)}>
@@ -203,18 +201,16 @@ export default function Historico() {
         </div>
       )}
 
-      {/* ══ MODAL: ARQUIVAR ══ */}
       {modalArquivar && (
         <div style={s.overlay}>
           <div style={s.modal}>
             <div style={s.modalHeader}>
               <span style={s.modalTitle}>Arquivar ata?</span>
-              <button style={s.btnClose} onClick={() => setModalArquivar(null)}>
-                <i className="ti ti-x" />
-              </button>
+              <button style={s.btnClose} onClick={() => setModalArquivar(null)}><i className="ti ti-x" /></button>
             </div>
             <p style={s.modalDesc}>
-              A ata <strong>#{String(modalArquivar.numero_reuniao || 1).padStart(2,'0')}</strong> de <strong>{new Date(modalArquivar.data_reuniao + 'T12:00:00').toLocaleDateString('pt-BR')}</strong> será arquivada.
+              A ata <strong>#{String(modalArquivar.numero_reuniao || 1).padStart(2, '0')}</strong> de{' '}
+              <strong>{new Date(modalArquivar.data_reuniao + 'T12:00:00').toLocaleDateString('pt-BR')}</strong> será arquivada.
               Ela vai sair do dashboard e das pendências, mas <strong>pode ser restaurada a qualquer momento</strong>.
             </p>
             <div style={s.modalFooter}>
@@ -227,18 +223,16 @@ export default function Historico() {
         </div>
       )}
 
-      {/* ══ MODAL: EXCLUIR DEFINITIVO ══ */}
       {modalExcluir && (
         <div style={s.overlay}>
           <div style={s.modal}>
             <div style={s.modalHeader}>
               <span style={{ ...s.modalTitle, color: '#dc2626' }}>⚠ Excluir permanentemente</span>
-              <button style={s.btnClose} onClick={() => setModalExcluir(null)}>
-                <i className="ti ti-x" />
-              </button>
+              <button style={s.btnClose} onClick={() => setModalExcluir(null)}><i className="ti ti-x" /></button>
             </div>
             <p style={s.modalDesc}>
-              Esta ação é <strong>irreversível</strong>. Todos os grupos, itens e observações da ata <strong>{labelConfirm(modalExcluir)}</strong> serão apagados para sempre.
+              Esta ação é <strong>irreversível</strong>. Todos os grupos, itens e observações da ata{' '}
+              <strong>{labelConfirm(modalExcluir)}</strong> serão apagados para sempre.
             </p>
             <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 8 }}>
               Para confirmar, digite <strong>{labelConfirm(modalExcluir)}</strong> abaixo:
@@ -283,7 +277,7 @@ const s = {
   empty:    { textAlign: 'center', padding: '60px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: '#6b7280' },
   card:     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, overflow: 'hidden' },
   cardArquivada: { opacity: 0.7, borderColor: '#fcd34d', background: '#fffbeb' },
-  cardClickArea:  { display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', cursor: 'pointer' },
+  cardClickArea: { display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px', cursor: 'pointer' },
   cardLeft: { flex: 1 },
   tipoBadge:{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 4 },
   numReuniao: { fontSize: 12, fontWeight: 800, color: '#9ca3af', letterSpacing: '0.05em' },
@@ -306,7 +300,7 @@ const s = {
   modalDesc:   { fontSize: 13, color: '#6b7280', lineHeight: 1.6, marginBottom: 16 },
   inputConfirm:{ width: '100%', border: '1.5px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', fontSize: 14, fontFamily: 'Inter, sans-serif', outline: 'none', marginBottom: 16 },
   modalFooter: { display: 'flex', gap: 8 },
-  btnConfirmArquivar:{ flex: 1, background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: 'Inter, sans-serif' },
-  btnExcluirConfirm: { flex: 1, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: 'Inter, sans-serif' },
+  btnConfirmArquivar: { flex: 1, background: '#f59e0b', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: 'Inter, sans-serif' },
+  btnExcluirConfirm:  { flex: 1, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontFamily: 'Inter, sans-serif' },
   btnCancelar:{ background: 'none', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer', color: '#6b7280', fontFamily: 'Inter, sans-serif' },
 }
