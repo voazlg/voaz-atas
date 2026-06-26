@@ -19,7 +19,7 @@ export function Header() {
       {/* Logo — clica e volta para a hub */}
       <div style={s.left} onClick={() => window.location.href = '/'} role="button" title="Voltar à hub VOAZ">
         <img
-          src="/logo-voaz-white.jpg"
+          src="https://voaz-obras.vercel.app/logo-voaz-white.jpg"
           alt="VOAZ"
           width={32}
           height={32}
