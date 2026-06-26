@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
-import { GRUPOS_TEMPLATE, STATUS, TIPOS_ATA } from '../lib/supabase'
+import { supabase, GRUPOS_TEMPLATE, STATUS, TIPOS_ATA } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../hooks/useAuth'
 import { gerarPDF } from '../lib/pdf'
@@ -15,6 +14,7 @@ export default function Ata() {
   const { showToast, ToastContainer } = useToast()
 
   const [obra, setObra]               = useState(null)
+  const [obraMeta, setObraMeta]       = useState(null)
   const [ata, setAta]                 = useState(null)
   const [grupos, setGrupos]           = useState([])
   const [responsaveis, setResponsaveis] = useState([])
@@ -22,18 +22,12 @@ export default function Ata() {
   const [saving, setSaving]           = useState(false)
   const [tab, setTab]                 = useState('cabecalho')
 
-  // Modal de observações
   const [obsModal, setObsModal]       = useState(null)
   const [obsText, setObsText]         = useState('')
-
-  // Modal de transferência
   const [transferModal, setTransferModal] = useState(null)
   const [transferOutraAtaModal, setTransferOutraAtaModal] = useState(null)
-
-  // Modal de resumo/PDF
   const [resumoModal, setResumoModal] = useState(false)
 
-  // Auto-save timer
   const saveTimer = useRef(null)
 
   useEffect(() => { init() }, [obraId, tipo])
@@ -41,33 +35,38 @@ export default function Ata() {
   async function init() {
     setLoading(true)
 
-    const { data: obraData } = await supabase.from('obras').select('*').eq('id', obraId).single()
+    // Busca obra + metadados cp
+    const { data: obraData } = await supabase
+      .from('obras').select('*').eq('id', obraId).single()
     setObra(obraData)
 
+    const { data: metaData } = await supabase
+      .from('cp_obras_meta').select('*').eq('obra_id', obraId).single()
+    setObraMeta(metaData)
+
+    // Responsáveis — tabela cp_responsaveis
     const { data: resps } = await supabase
-      .from('responsaveis')
+      .from('cp_responsaveis')
       .select('*')
       .eq('obra_id', obraId)
       .order('nome')
     setResponsaveis(resps || [])
 
-    // Se veio com ?ata=ID na URL, abrir ata específica do histórico
     const params = new URLSearchParams(window.location.search)
     const ataIdParam = params.get('ata')
 
     if (ataIdParam) {
       const { data: ataEspecifica } = await supabase
-        .from('atas').select('*').eq('id', ataIdParam).single()
+        .from('cp_atas').select('*').eq('id', ataIdParam).single()
       setAta(ataEspecifica)
       if (ataEspecifica) await loadGrupos(ataEspecifica.id)
       setLoading(false)
       return
     }
 
-    // Sem ?ata= na URL significa "nova reunião" — sempre cria nova ata
-    // Buscar a ata de maior número para copiar
+    // Nova reunião — busca última ata para copiar
     const { data: atasExistentes } = await supabase
-      .from('atas')
+      .from('cp_atas')
       .select('*')
       .eq('obra_id', obraId)
       .eq('tipo', tipo)
@@ -76,40 +75,39 @@ export default function Ata() {
 
     const ataUltima = atasExistentes?.[0] || null
 
-    const { data: pm } = await supabase
-      .from('usuarios').select('id')
-      .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
+    // Usuário logado — central usa perfis com id = auth.uid()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    const { data: nova } = await supabase
+      .from('cp_atas')
+      .insert({
+        obra_id: obraId,
+        tipo,
+        data_reuniao: hoje,
+        created_by: user?.id,
+      })
+      .select()
       .single()
 
-    const { data: nova } = await supabase.from('atas').insert({
-      obra_id: obraId,
-      tipo,
-      data_reuniao: hoje,
-      created_by: pm?.id,
-    }).select().single()
     let ataData = nova
 
     if (ataData) {
       if (ataUltima) {
-        // Copiar grupos e itens da ata anterior
         await copiarDaAtaAnterior(ataData.id, ataUltima.id)
       } else {
-        // Primeira ata desta obra — usar template
         await criarGruposTemplate(ataData.id)
       }
     }
 
     setAta(ataData)
     if (ataData) await loadGrupos(ataData.id)
-
     setLoading(false)
   }
 
   async function copiarDaAtaAnterior(novaAtaId, ataAnteriorId) {
-    // Buscar grupos e itens da ata anterior
     const { data: gruposAnt } = await supabase
-      .from('grupos')
-      .select('*, itens(*)')
+      .from('cp_grupos')
+      .select('*, cp_itens(*)')
       .eq('ata_id', ataAnteriorId)
       .order('ordem')
 
@@ -117,15 +115,13 @@ export default function Ata() {
 
     for (let gi = 0; gi < gruposAnt.length; gi++) {
       const ga = gruposAnt[gi]
-      const { data: novoGrupo } = await supabase.from('grupos').insert({
-        ata_id: novaAtaId,
-        titulo: ga.titulo,
-        ordem: ga.ordem,
-      }).select().single()
+      const { data: novoGrupo } = await supabase
+        .from('cp_grupos')
+        .insert({ ata_id: novaAtaId, titulo: ga.titulo, ordem: ga.ordem })
+        .select().single()
 
-      if (novoGrupo && ga.itens?.length > 0) {
-        // Copiar TODOS os itens — concluídos e pendentes — mantendo histórico completo
-        const itensParaCopiar = ga.itens.map(item => ({
+      if (novoGrupo && ga.cp_itens?.length > 0) {
+        const itensParaCopiar = ga.cp_itens.map(item => ({
           grupo_id: novoGrupo.id,
           ata_id: novaAtaId,
           obra_id: obraId,
@@ -137,7 +133,7 @@ export default function Ata() {
           status: item.status === 'CONCLUIDO' ? 'CONCLUIDO' : item.status,
           ordem: item.ordem,
         }))
-        await supabase.from('itens').insert(itensParaCopiar)
+        await supabase.from('cp_itens').insert(itensParaCopiar)
       }
     }
   }
@@ -146,12 +142,13 @@ export default function Ata() {
     const template = GRUPOS_TEMPLATE[tipo] || []
     for (let i = 0; i < template.length; i++) {
       const g = template[i]
-      const { data: grupo } = await supabase.from('grupos').insert({
-        ata_id: ataId, titulo: g.titulo, ordem: i,
-      }).select().single()
+      const { data: grupo } = await supabase
+        .from('cp_grupos')
+        .insert({ ata_id: ataId, titulo: g.titulo, ordem: i })
+        .select().single()
 
       if (grupo && g.itens.length > 0) {
-        await supabase.from('itens').insert(
+        await supabase.from('cp_itens').insert(
           g.itens.map((assunto, j) => ({
             grupo_id: grupo.id,
             ata_id: ataId,
@@ -168,99 +165,91 @@ export default function Ata() {
 
   async function loadGrupos(ataId) {
     const { data: gs } = await supabase
-      .from('grupos')
-      .select('*, itens(*)')
+      .from('cp_grupos')
+      .select('*, cp_itens(*)')
       .eq('ata_id', ataId)
       .order('ordem')
 
     if (gs) {
-      gs.forEach(g => g.itens.sort((a, b) => a.ordem - b.ordem))
-      setGrupos(gs)
+      gs.forEach(g => g.cp_itens.sort((a, b) => a.ordem - b.ordem))
+      // Normaliza: usa cp_itens como itens para compatibilidade com sub-componentes
+      setGrupos(gs.map(g => ({ ...g, itens: g.cp_itens })))
     }
   }
 
-  // ── AUTO-SAVE ─────────────────────────────────────────
   function scheduleSave(grupoId, itemId, field, value) {
-    // Atualiza estado local imediatamente
     setGrupos(prev => prev.map(g =>
       g.id !== grupoId ? g : {
         ...g,
-        itens: g.itens.map(i =>
-          i.id !== itemId ? i : { ...i, [field]: value }
-        )
+        itens: g.itens.map(i => i.id !== itemId ? i : { ...i, [field]: value })
       }
     ))
-
-    // Debounce para o banco
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
-      await supabase.from('itens').update({ [field]: value }).eq('id', itemId)
+      await supabase.from('cp_itens').update({ [field]: value }).eq('id', itemId)
     }, 800)
   }
 
   async function saveItemImmediate(itemId, field, value) {
-    await supabase.from('itens').update({ [field]: value }).eq('id', itemId)
+    await supabase.from('cp_itens').update({ [field]: value }).eq('id', itemId)
   }
 
-  // ── ADICIONAR GRUPO ────────────────────────────────────
   async function addGrupo() {
     const titulo = prompt('Nome do grupo:')
     if (!titulo?.trim()) return
-    const { data } = await supabase.from('grupos').insert({
-      ata_id: ata.id,
-      titulo: titulo.trim(),
-      ordem: grupos.length,
-    }).select().single()
+    const { data } = await supabase
+      .from('cp_grupos')
+      .insert({ ata_id: ata.id, titulo: titulo.trim(), ordem: grupos.length })
+      .select().single()
     if (data) setGrupos(prev => [...prev, { ...data, itens: [] }])
   }
 
-  // ── ADICIONAR ITEM ─────────────────────────────────────
   async function addItem(grupoId) {
-    const { data } = await supabase.from('itens').insert({
-      grupo_id: grupoId,
-      ata_id: ata.id,
-      obra_id: obraId,
-      assunto: '',
-      data_item: hoje,
-      status: 'EM_ANDAMENTO',
-      ordem: grupos.find(g => g.id === grupoId)?.itens.length || 0,
-    }).select().single()
+    const { data } = await supabase
+      .from('cp_itens')
+      .insert({
+        grupo_id: grupoId,
+        ata_id: ata.id,
+        obra_id: obraId,
+        assunto: '',
+        data_item: hoje,
+        status: 'EM_ANDAMENTO',
+        ordem: grupos.find(g => g.id === grupoId)?.itens.length || 0,
+      })
+      .select().single()
 
     if (data) {
       setGrupos(prev => prev.map(g =>
         g.id !== grupoId ? g : { ...g, itens: [...g.itens, data] }
       ))
-      // Focar no novo item após render
       setTimeout(() => {
         document.getElementById(`assunto-${data.id}`)?.focus()
       }, 100)
     }
   }
 
-  // ── DELETAR ITEM ───────────────────────────────────────
   async function delItem(grupoId, itemId) {
-    await supabase.from('itens').delete().eq('id', itemId)
+    await supabase.from('cp_itens').delete().eq('id', itemId)
     setGrupos(prev => prev.map(g =>
       g.id !== grupoId ? g : { ...g, itens: g.itens.filter(i => i.id !== itemId) }
     ))
   }
 
-  // ── RESPONSÁVEIS ──────────────────────────────────────
   async function addResponsavel() {
     const nome = prompt('Nome do responsável:')
     if (!nome?.trim()) return
-    const { data } = await supabase.from('responsaveis').insert({
-      obra_id: obraId, nome: nome.trim(),
-    }).select().single()
+    const { data } = await supabase
+      .from('cp_responsaveis')
+      .insert({ obra_id: obraId, nome: nome.trim() })
+      .select().single()
     if (data) setResponsaveis(prev => [...prev, data])
   }
 
   async function delResponsavel(id) {
-    await supabase.from('responsaveis').delete().eq('id', id)
+    await supabase.from('cp_responsaveis').delete().eq('id', id)
     setResponsaveis(prev => prev.filter(r => r.id !== id))
   }
 
-  // ── OBS MODAL ─────────────────────────────────────────
   function openObs(grupoId, item) {
     setObsModal({ grupoId, item })
     setObsText('')
@@ -274,7 +263,7 @@ export default function Ata() {
       ? (item.observacoes ? item.observacoes + '\n' + d + ' - ' + obsText.trim() : d + ' - ' + obsText.trim())
       : item.observacoes
 
-    await supabase.from('itens').update({ observacoes: novaObs }).eq('id', item.id)
+    await supabase.from('cp_itens').update({ observacoes: novaObs }).eq('id', item.id)
     setGrupos(prev => prev.map(g =>
       g.id !== grupoId ? g : {
         ...g, itens: g.itens.map(i => i.id !== item.id ? i : { ...i, observacoes: novaObs })
@@ -284,7 +273,6 @@ export default function Ata() {
     showToast('Observação salva')
   }
 
-  // ── TRANSFER (mesmo tipo de ata) ─────────────────────
   function openTransfer(grupoId, item) {
     setTransferModal({ grupoId, item })
   }
@@ -292,17 +280,20 @@ export default function Ata() {
   async function doTransfer(destGrupoId) {
     if (!transferModal) return
     const { item } = transferModal
-    const { data } = await supabase.from('itens').insert({
-      grupo_id: destGrupoId,
-      ata_id: ata.id,
-      obra_id: obraId,
-      assunto: item.assunto,
-      data_item: hoje,
-      responsavel: item.responsavel,
-      observacoes: item.observacoes,
-      status: item.status,
-      ordem: 99,
-    }).select().single()
+    const { data } = await supabase
+      .from('cp_itens')
+      .insert({
+        grupo_id: destGrupoId,
+        ata_id: ata.id,
+        obra_id: obraId,
+        assunto: item.assunto,
+        data_item: hoje,
+        responsavel: item.responsavel,
+        observacoes: item.observacoes,
+        status: item.status,
+        ordem: 99,
+      })
+      .select().single()
 
     if (data) {
       setGrupos(prev => prev.map(g =>
@@ -313,13 +304,12 @@ export default function Ata() {
     setTransferModal(null)
   }
 
-  // ── TRANSFER PARA OUTRA ATA (interno ↔ externo) ───────
   async function doTransferOutraAta(item) {
     const tipoDestino = tipo === 'interno' ? 'externo' : 'interno'
+    const { data: { user } } = await supabase.auth.getUser()
 
-    // Buscar ou criar ata do tipo destino para hoje
     let { data: ataDestino } = await supabase
-      .from('atas')
+      .from('cp_atas')
       .select('*')
       .eq('obra_id', obraId)
       .eq('tipo', tipoDestino)
@@ -327,28 +317,17 @@ export default function Ata() {
       .single()
 
     if (!ataDestino) {
-      const { data: pmUser } = await supabase
-        .from('usuarios')
-        .select('id')
-        .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
-        .single()
-
-      const { data: novaAta } = await supabase.from('atas').insert({
-        obra_id: obraId,
-        tipo: tipoDestino,
-        data_reuniao: hoje,
-        created_by: pmUser?.id,
-      }).select().single()
+      const { data: novaAta } = await supabase
+        .from('cp_atas')
+        .insert({ obra_id: obraId, tipo: tipoDestino, data_reuniao: hoje, created_by: user?.id })
+        .select().single()
       ataDestino = novaAta
 
-      // Criar grupos do template na nova ata
       if (ataDestino) {
         const template = GRUPOS_TEMPLATE[tipoDestino] || []
         for (let i = 0; i < template.length; i++) {
-          await supabase.from('grupos').insert({
-            ata_id: ataDestino.id,
-            titulo: template[i].titulo,
-            ordem: i,
+          await supabase.from('cp_grupos').insert({
+            ata_id: ataDestino.id, titulo: template[i].titulo, ordem: i,
           })
         }
       }
@@ -357,26 +336,18 @@ export default function Ata() {
     if (!ataDestino) { showToast('Erro ao acessar ata destino'); return }
 
     const { data: gruposDestino } = await supabase
-      .from('grupos')
-      .select('*')
-      .eq('ata_id', ataDestino.id)
-      .order('ordem')
+      .from('cp_grupos').select('*').eq('ata_id', ataDestino.id).order('ordem')
 
     setTransferModal(null)
     setTransferOutraAtaModal({ item, ataDestino, gruposDestino: gruposDestino || [], tipoDestino })
   }
 
-  // ── SE FOR KICKOFF, PERMITE ESCOLHER PARA QUAL TIPO ───
-  function openTransferKickoff(item) {
-    setTransferModal(null)
-    setTransferOutraAtaModal({ item, escolherTipo: true })
-  }
-
   async function selecionarTipoDestino(tipoDestino) {
     const { item } = transferOutraAtaModal
+    const { data: { user } } = await supabase.auth.getUser()
 
     let { data: ataDestino } = await supabase
-      .from('atas')
+      .from('cp_atas')
       .select('*')
       .eq('obra_id', obraId)
       .eq('tipo', tipoDestino)
@@ -384,22 +355,23 @@ export default function Ata() {
       .single()
 
     if (!ataDestino) {
-      const { data: pmUser } = await supabase
-        .from('usuarios').select('id').eq('auth_id', (await supabase.auth.getUser()).data.user.id).single()
-      const { data: novaAta } = await supabase.from('atas').insert({
-        obra_id: obraId, tipo: tipoDestino, data_reuniao: hoje, created_by: pmUser?.id,
-      }).select().single()
+      const { data: novaAta } = await supabase
+        .from('cp_atas')
+        .insert({ obra_id: obraId, tipo: tipoDestino, data_reuniao: hoje, created_by: user?.id })
+        .select().single()
       ataDestino = novaAta
       if (ataDestino) {
         const template = GRUPOS_TEMPLATE[tipoDestino] || []
         for (let i = 0; i < template.length; i++) {
-          await supabase.from('grupos').insert({ ata_id: ataDestino.id, titulo: template[i].titulo, ordem: i })
+          await supabase.from('cp_grupos').insert({
+            ata_id: ataDestino.id, titulo: template[i].titulo, ordem: i,
+          })
         }
       }
     }
 
     const { data: gruposDestino } = await supabase
-      .from('grupos').select('*').eq('ata_id', ataDestino.id).order('ordem')
+      .from('cp_grupos').select('*').eq('ata_id', ataDestino.id).order('ordem')
 
     setTransferOutraAtaModal({ item, ataDestino, gruposDestino: gruposDestino || [], tipoDestino })
   }
@@ -408,7 +380,7 @@ export default function Ata() {
     if (!transferOutraAtaModal) return
     const { item, ataDestino, tipoDestino } = transferOutraAtaModal
 
-    await supabase.from('itens').insert({
+    await supabase.from('cp_itens').insert({
       grupo_id: destGrupoId,
       ata_id: ataDestino.id,
       obra_id: obraId,
@@ -424,7 +396,6 @@ export default function Ata() {
     setTransferOutraAtaModal(null)
   }
 
-  // ── RESUMO / PDF ─────────────────────────────────────
   function gerarResumoTexto() {
     const linhas = []
     let totalPendentes = 0
@@ -432,12 +403,9 @@ export default function Ata() {
     grupos.forEach(g => {
       const itensPendentes = g.itens.filter(i => i.status !== 'CONCLUIDO')
       if (itensPendentes.length === 0) return
-
-      // Cabeçalho do grupo
       linhas.push('')
       linhas.push(`📌 ${g.titulo.toUpperCase()}`)
       linhas.push('─'.repeat(36))
-
       itensPendentes.forEach(i => {
         const status = STATUS[i.status]?.label || i.status
         const resp = i.responsavel ? ` | ${i.responsavel}` : ''
@@ -449,9 +417,10 @@ export default function Ata() {
       })
     })
 
+    // Usa metadados do cp para cabeçalho
     const header = [
       `VOAZ — Checkpoint ${tipo === 'interno' ? 'Interno' : 'Externo'}`,
-      `${obra?.cliente} | ${obra?.nome}`,
+      `${obraMeta?.cliente || obra?.nome} | ${obra?.nome}`,
       `Data: ${new Date(hoje).toLocaleDateString('pt-BR')}`,
       '',
       `PENDÊNCIAS (${totalPendentes} itens):`,
@@ -461,20 +430,11 @@ export default function Ata() {
     return header + linhas.join('\n')
   }
 
-  // ── CONTADORES ────────────────────────────────────────
   const todosItens = grupos.flatMap(g => g.itens)
   const counts = Object.keys(STATUS).reduce((acc, k) => {
     acc[k] = todosItens.filter(i => i.status === k).length
     return acc
   }, {})
-
-  // ── TAB NAVIGATION ────────────────────────────────────
-  // Implementada via tabIndex e onKeyDown nas células
-  function handleCellTab(e, grupoId, itemId, field) {
-    if (e.key !== 'Tab') return
-    // O browser já vai para o próximo tabIndex — deixamos acontecer naturalmente
-    // O tabIndex é definido em ordem na renderização da tabela
-  }
 
   if (loading) return <div style={{ padding: 40, color: '#6b7280' }}>Carregando ata...</div>
   if (!obra || !ata) return <div style={{ padding: 40, color: '#dc2626' }}>Ata não encontrada.</div>
@@ -485,17 +445,16 @@ export default function Ata() {
     <div style={s.page}>
       <ToastContainer />
 
-      {/* ── HEADER DA ATA ── */}
       <div style={s.ataHeader}>
         <button style={s.btnBack} onClick={() => navigate('/obras')}>
           <i className="ti ti-arrow-left" /> Obras
         </button>
         <div style={s.ataInfo}>
-          <span style={s.ataCliente}>{obra.cliente}</span>
+          <span style={s.ataCliente}>{obraMeta?.cliente || obra.nome}</span>
           <span style={s.ataNome}>{obra.nome}</span>
           {ata.numero_reuniao && (
             <span style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', letterSpacing: '0.05em' }}>
-              #{String(ata.numero_reuniao).padStart(2,'0')}
+              #{String(ata.numero_reuniao).padStart(2, '0')}
             </span>
           )}
           <span style={{
@@ -518,7 +477,6 @@ export default function Ata() {
         </div>
       </div>
 
-      {/* ── PILLS DE STATUS ── */}
       <div style={s.pillsRow}>
         {Object.entries(STATUS).map(([k, v]) => (
           <span key={k} style={{ ...s.pill, background: v.color, color: v.text }}>
@@ -527,12 +485,11 @@ export default function Ata() {
         ))}
       </div>
 
-      {/* ── TABS ── */}
       <div style={s.tabs}>
         {[
-          { key: 'cabecalho',    label: 'Cabeçalho',    icon: 'ti-info-circle' },
-          { key: 'pauta',        label: 'Pauta',         icon: 'ti-list' },
-          { key: 'responsaveis', label: 'Responsáveis',  icon: 'ti-users' },
+          { key: 'cabecalho',    label: 'Cabeçalho',   icon: 'ti-info-circle' },
+          { key: 'pauta',        label: 'Pauta',        icon: 'ti-list' },
+          { key: 'responsaveis', label: 'Responsáveis', icon: 'ti-users' },
         ].map(t => (
           <button
             key={t.key}
@@ -544,17 +501,16 @@ export default function Ata() {
         ))}
       </div>
 
-      {/* ══ ABA: CABEÇALHO ══ */}
       {tab === 'cabecalho' && (
         <div style={s.section}>
           <div style={s.cabGrid}>
             {[
-              { label: 'Cliente',   value: obra.cliente,    readonly: true },
-              { label: 'Data',      value: ata.data_reuniao, readonly: true },
-              { label: 'Obra',      value: obra.nome,       readonly: true },
-              { label: 'Fase',      value: obra.fase || '—', readonly: true },
-              { label: 'Local',     value: obra.local || '—', readonly: true },
-              { label: 'Parceiros', value: obra.parceiros || '—', readonly: true },
+              { label: 'Cliente',   value: obraMeta?.cliente || '—' },
+              { label: 'Data',      value: ata.data_reuniao },
+              { label: 'Obra',      value: obra.nome },
+              { label: 'Fase',      value: obraMeta?.fase || '—' },
+              { label: 'Local',     value: obraMeta?.local || '—' },
+              { label: 'Parceiros', value: obraMeta?.parceiros || '—' },
             ].map(f => (
               <div key={f.label} style={s.cabRow}>
                 <span style={s.cabLabel}>{f.label}</span>
@@ -562,16 +518,13 @@ export default function Ata() {
               </div>
             ))}
           </div>
-          <p style={s.cabNote}>
-            Para editar informações da obra, acesse a tela de Obras.
-          </p>
+          <p style={s.cabNote}>Para editar informações da obra, acesse a tela de Obras.</p>
         </div>
       )}
 
-      {/* ══ ABA: PAUTA ══ */}
       {tab === 'pauta' && (
         <div style={s.section}>
-          {grupos.map((grupo, gi) => (
+          {grupos.map((grupo) => (
             <GrupoAta
               key={grupo.id}
               grupo={grupo}
@@ -594,7 +547,6 @@ export default function Ata() {
         </div>
       )}
 
-      {/* ══ ABA: RESPONSÁVEIS ══ */}
       {tab === 'responsaveis' && (
         <div style={s.section}>
           <div style={s.respBox}>
@@ -617,28 +569,20 @@ export default function Ata() {
         </div>
       )}
 
-      {/* ══ MODAL: OBS ══ */}
       {obsModal && (
         <div style={s.overlay}>
           <div style={s.modal}>
             <div style={s.modalHeader}>
               <span style={s.modalTitle}>{obsModal.item.assunto || 'Observações'}</span>
-              <button style={s.btnClose} onClick={() => setObsModal(null)}>
-                <i className="ti ti-x" />
-              </button>
+              <button style={s.btnClose} onClick={() => setObsModal(null)}><i className="ti ti-x" /></button>
             </div>
             {obsModal.item.observacoes && (
-              <div style={s.obsHistory}>
-                {obsModal.item.observacoes}
-              </div>
+              <div style={s.obsHistory}>{obsModal.item.observacoes}</div>
             )}
             <textarea
-              style={s.obsInput}
-              rows={3}
+              style={s.obsInput} rows={3}
               placeholder="Nova observação de hoje..."
-              value={obsText}
-              onChange={e => setObsText(e.target.value)}
-              autoFocus
+              value={obsText} onChange={e => setObsText(e.target.value)} autoFocus
             />
             <div style={s.modalFooter}>
               <button style={s.btnSave} onClick={saveObs}>Salvar</button>
@@ -648,71 +592,53 @@ export default function Ata() {
         </div>
       )}
 
-      {/* ══ MODAL: TRANSFER ══ */}
       {transferModal && (
         <div style={s.overlay}>
           <div style={{ ...s.modal, maxWidth: 380 }}>
             <div style={s.modalHeader}>
               <span style={s.modalTitle}>Copiar item para...</span>
-              <button style={s.btnClose} onClick={() => setTransferModal(null)}>
-                <i className="ti ti-x" />
-              </button>
+              <button style={s.btnClose} onClick={() => setTransferModal(null)}><i className="ti ti-x" /></button>
             </div>
             <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 16 }}>
               "{transferModal.item.assunto?.substring(0, 50)}"
             </p>
-
-            {/* Botão para outra ata */}
             <div style={{ marginBottom: 16 }}>
               <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
                 Enviar para checkpoint
               </p>
               {tipo === 'kickoff' ? (
                 <>
-                  <button
-                    style={{ ...s.transferBtn, background: '#e0e7ff', borderColor: '#a5b4fc', color: '#3730a3', fontWeight: 700, marginBottom: 8 }}
-                    onClick={() => { setTransferModal(null); selecionarTipoDestino('interno') }}
-                  >
+                  <button style={{ ...s.transferBtn, background: '#e0e7ff', borderColor: '#a5b4fc', color: '#3730a3', fontWeight: 700, marginBottom: 8 }}
+                    onClick={() => { setTransferModal(null); selecionarTipoDestino('interno') }}>
                     <i className="ti ti-lock" /> Enviar para CP Interno
                   </button>
-                  <button
-                    style={{ ...s.transferBtn, background: '#dcfce7', borderColor: '#86efac', color: '#166534', fontWeight: 700 }}
-                    onClick={() => { setTransferModal(null); selecionarTipoDestino('externo') }}
-                  >
+                  <button style={{ ...s.transferBtn, background: '#dcfce7', borderColor: '#86efac', color: '#166534', fontWeight: 700 }}
+                    onClick={() => { setTransferModal(null); selecionarTipoDestino('externo') }}>
                     <i className="ti ti-users" /> Enviar para CP Externo
                   </button>
                 </>
               ) : (
                 <button
                   style={{ ...s.transferBtn, background: tipo === 'interno' ? '#dcfce7' : '#e0e7ff', borderColor: tipo === 'interno' ? '#86efac' : '#a5b4fc', color: tipo === 'interno' ? '#166534' : '#3730a3', fontWeight: 700 }}
-                  onClick={() => doTransferOutraAta(transferModal.item)}
-                >
+                  onClick={() => doTransferOutraAta(transferModal.item)}>
                   <i className={`ti ti-${tipo === 'interno' ? 'users' : 'lock'}`} />
                   Enviar para CP {tipo === 'interno' ? 'Externo' : 'Interno'}
                 </button>
               )}
             </div>
-
-            {/* Grupos da mesma ata */}
             <div>
               <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
                 Outro grupo desta ata
               </p>
-              {grupos
-                .filter(g => g.id !== transferModal.grupoId)
-                .map(g => (
-                  <button key={g.id} style={s.transferBtn} onClick={() => doTransfer(g.id)}>
-                    {g.titulo}
-                  </button>
-                ))}
+              {grupos.filter(g => g.id !== transferModal.grupoId).map(g => (
+                <button key={g.id} style={s.transferBtn} onClick={() => doTransfer(g.id)}>{g.titulo}</button>
+              ))}
             </div>
-
             <button style={{ ...s.btnCancel, marginTop: 12, width: '100%' }} onClick={() => setTransferModal(null)}>Cancelar</button>
           </div>
         </div>
       )}
 
-      {/* ══ MODAL: TRANSFER OUTRA ATA ══ */}
       {transferOutraAtaModal && (
         <div style={s.overlay}>
           <div style={{ ...s.modal, maxWidth: 380 }}>
@@ -722,58 +648,41 @@ export default function Ata() {
                   ? `CP ${transferOutraAtaModal.tipoDestino === 'interno' ? 'Interno' : 'Externo'} — qual grupo?`
                   : 'Escolha o destino'}
               </span>
-              <button style={s.btnClose} onClick={() => setTransferOutraAtaModal(null)}>
-                <i className="ti ti-x" />
-              </button>
+              <button style={s.btnClose} onClick={() => setTransferOutraAtaModal(null)}><i className="ti ti-x" /></button>
             </div>
             <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
               "{transferOutraAtaModal.item?.assunto?.substring(0, 50)}"
             </p>
             {transferOutraAtaModal.gruposDestino?.map(g => (
-              <button key={g.id} style={s.transferBtn} onClick={() => confirmarTransferOutraAta(g.id)}>
-                {g.titulo}
-              </button>
+              <button key={g.id} style={s.transferBtn} onClick={() => confirmarTransferOutraAta(g.id)}>{g.titulo}</button>
             ))}
             <button style={{ ...s.btnCancel, marginTop: 8, width: '100%' }} onClick={() => setTransferOutraAtaModal(null)}>Cancelar</button>
           </div>
         </div>
       )}
 
-      {/* ══ MODAL: RESUMO / PDF ══ */}
       {resumoModal && (
         <div style={s.overlay}>
           <div style={{ ...s.modal, maxWidth: 580 }}>
             <div style={s.modalHeader}>
               <span style={s.modalTitle}>Resumo de pendências</span>
-              <button style={s.btnClose} onClick={() => setResumoModal(false)}>
-                <i className="ti ti-x" />
-              </button>
+              <button style={s.btnClose} onClick={() => setResumoModal(false)}><i className="ti ti-x" /></button>
             </div>
             <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 12 }}>
               Copie o texto abaixo e cole no WhatsApp, e-mail ou onde quiser.
             </p>
             <textarea
               style={{ ...s.obsInput, height: 260, fontFamily: 'monospace', fontSize: 12 }}
-              value={resumoTexto}
-              readOnly
-              onClick={e => e.target.select()}
+              value={resumoTexto} readOnly onClick={e => e.target.select()}
             />
             <div style={s.modalFooter}>
-              <button style={s.btnSave} onClick={() => {
-                navigator.clipboard.writeText(resumoTexto)
-                showToast('Copiado!')
-              }}>
+              <button style={s.btnSave} onClick={() => { navigator.clipboard.writeText(resumoTexto); showToast('Copiado!') }}>
                 <i className="ti ti-copy" /> Copiar tudo
               </button>
-              <button style={s.btnCancel} onClick={() => {
-                gerarPDF(obra, ata, grupos, tipo)
-                showToast('PDF gerado!')
-              }}>
+              <button style={s.btnCancel} onClick={() => { gerarPDF(obra, ata, grupos, tipo); showToast('PDF gerado!') }}>
                 <i className="ti ti-file-type-pdf" /> Gerar PDF
               </button>
-              <button style={{ ...s.btnCancel, marginLeft: 'auto' }} onClick={() => setResumoModal(false)}>
-                Fechar
-              </button>
+              <button style={{ ...s.btnCancel, marginLeft: 'auto' }} onClick={() => setResumoModal(false)}>Fechar</button>
             </div>
           </div>
         </div>
@@ -782,24 +691,19 @@ export default function Ata() {
   )
 }
 
-// ── SUB-COMPONENTE: GRUPO ────────────────────────────────
 function GrupoAta({ grupo, grupos, responsaveis, onFieldChange, onStatusChange, onAddItem, onDelItem, onOpenObs, onTransfer }) {
   const [open, setOpen] = useState(true)
   const pendentes = grupo.itens.filter(i => i.status !== 'CONCLUIDO').length
-
   return (
     <div style={sg.wrap}>
       <div style={sg.header} onClick={() => setOpen(o => !o)}>
         <div style={sg.headerLeft}>
           <span style={sg.titulo}>{grupo.titulo}</span>
           <span style={sg.countPill}>{grupo.itens.length} itens</span>
-          {pendentes > 0 && (
-            <span style={sg.pendPill}>{pendentes} pendentes</span>
-          )}
+          {pendentes > 0 && <span style={sg.pendPill}>{pendentes} pendentes</span>}
         </div>
         <i className={`ti ti-chevron-${open ? 'up' : 'down'}`} style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14 }} />
       </div>
-
       {open && (
         <>
           <div style={{ overflowX: 'auto' }}>
@@ -819,14 +723,9 @@ function GrupoAta({ grupo, grupos, responsaveis, onFieldChange, onStatusChange, 
               <tbody>
                 {grupo.itens.map((item, idx) => (
                   <ItemRow
-                    key={item.id}
-                    item={item}
-                    grupoId={grupo.id}
-                    grupos={grupos}
-                    responsaveis={responsaveis}
-                    tabBase={idx * 6}
-                    onFieldChange={onFieldChange}
-                    onStatusChange={onStatusChange}
+                    key={item.id} item={item} grupoId={grupo.id} grupos={grupos}
+                    responsaveis={responsaveis} tabBase={idx * 6}
+                    onFieldChange={onFieldChange} onStatusChange={onStatusChange}
                     onDel={() => onDelItem(grupo.id, item.id)}
                     onOpenObs={() => onOpenObs(grupo.id, item)}
                     onTransfer={() => onTransfer(grupo.id, item)}
@@ -844,79 +743,45 @@ function GrupoAta({ grupo, grupos, responsaveis, onFieldChange, onStatusChange, 
   )
 }
 
-// ── SUB-COMPONENTE: LINHA ────────────────────────────────
 function ItemRow({ item, grupoId, grupos, responsaveis, tabBase, onFieldChange, onStatusChange, onDel, onOpenObs, onTransfer }) {
   const statusCfg = STATUS[item.status] || STATUS.EM_ANDAMENTO
   const obsPreview = item.observacoes
     ? item.observacoes.split('\n').slice(-1)[0].substring(0, 35) + (item.observacoes.length > 35 ? '…' : '')
     : null
-
   return (
     <tr style={sr.row}>
+      <td style={sr.td}><button style={sr.delBtn} onClick={onDel} tabIndex={-1}>×</button></td>
       <td style={sr.td}>
-        <button style={sr.delBtn} onClick={onDel} tabIndex={-1}>×</button>
-      </td>
-      <td style={sr.td}>
-        <textarea
-          id={`assunto-${item.id}`}
-          style={sr.cellInput}
-          value={item.assunto || ''}
+        <textarea id={`assunto-${item.id}`} style={sr.cellInput} value={item.assunto || ''}
           onChange={e => onFieldChange(grupoId, item.id, 'assunto', e.target.value)}
           onInput={e => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px' }}
-          rows={1}
-          tabIndex={tabBase + 1}
-        />
+          rows={1} tabIndex={tabBase + 1} />
       </td>
       <td style={sr.td}>
-        <input
-          style={sr.dateInput}
-          type="date"
-          value={item.data_item || ''}
-          onChange={e => onFieldChange(grupoId, item.id, 'data_item', e.target.value)}
-          tabIndex={tabBase + 2}
-        />
+        <input style={sr.dateInput} type="date" value={item.data_item || ''}
+          onChange={e => onFieldChange(grupoId, item.id, 'data_item', e.target.value)} tabIndex={tabBase + 2} />
       </td>
       <td style={sr.td}>
-        <input
-          style={sr.dateInput}
-          type="date"
-          value={item.data_limite || ''}
-          onChange={e => onFieldChange(grupoId, item.id, 'data_limite', e.target.value)}
-          tabIndex={tabBase + 3}
-        />
+        <input style={sr.dateInput} type="date" value={item.data_limite || ''}
+          onChange={e => onFieldChange(grupoId, item.id, 'data_limite', e.target.value)} tabIndex={tabBase + 3} />
       </td>
       <td style={sr.td}>
-        <select
-          style={sr.respSelect}
-          value={item.responsavel || ''}
-          onChange={e => onFieldChange(grupoId, item.id, 'responsavel', e.target.value)}
-          tabIndex={tabBase + 4}
-        >
+        <select style={sr.respSelect} value={item.responsavel || ''}
+          onChange={e => onFieldChange(grupoId, item.id, 'responsavel', e.target.value)} tabIndex={tabBase + 4}>
           <option value="">—</option>
-          {responsaveis.map(r => (
-            <option key={r.id} value={r.nome}>{r.nome}</option>
-          ))}
+          {responsaveis.map(r => <option key={r.id} value={r.nome}>{r.nome}</option>)}
         </select>
       </td>
       <td style={sr.td}>
-        <button
-          style={{ ...sr.obsBtn, ...(item.observacoes ? sr.obsBtnHas : {}) }}
-          onClick={onOpenObs}
-          tabIndex={tabBase + 5}
-        >
+        <button style={{ ...sr.obsBtn, ...(item.observacoes ? sr.obsBtnHas : {}) }}
+          onClick={onOpenObs} tabIndex={tabBase + 5}>
           {obsPreview || '+ obs'}
         </button>
       </td>
       <td style={sr.td}>
-        <select
-          style={{ ...sr.statusSel, background: statusCfg.color, color: statusCfg.text }}
-          value={item.status}
-          onChange={e => onStatusChange(grupoId, item.id, e.target.value)}
-          tabIndex={tabBase + 6}
-        >
-          {Object.entries(STATUS).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
+        <select style={{ ...sr.statusSel, background: statusCfg.color, color: statusCfg.text }}
+          value={item.status} onChange={e => onStatusChange(grupoId, item.id, e.target.value)} tabIndex={tabBase + 6}>
+          {Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
       </td>
       <td style={sr.td}>
@@ -928,7 +793,6 @@ function ItemRow({ item, grupoId, grupos, responsaveis, tabBase, onFieldChange, 
   )
 }
 
-// ── ESTILOS ──────────────────────────────────────────────
 const s = {
   page:       { padding: '0 0 60px' },
   ataHeader:  { background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '14px 24px', display: 'flex', alignItems: 'center', gap: 16 },
@@ -970,7 +834,6 @@ const s = {
   btnCancel:  { background: 'none', border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer', color: '#6b7280', display: 'flex', alignItems: 'center', gap: 6 },
   transferBtn:{ width: '100%', padding: '11px 14px', border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer', textAlign: 'left', color: '#2e2e2e', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 },
 }
-
 const sg = {
   wrap:     { border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', marginBottom: 12 },
   header:   { background: '#2e2e2e', color: '#fff', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' },
@@ -982,7 +845,6 @@ const sg = {
   th:       { background: '#f9fafb', padding: '7px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6b7280', textAlign: 'left', borderBottom: '1px solid #e5e7eb' },
   btnAdd:   { display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '8px 16px', background: '#f9fafb', border: 'none', fontSize: 12, fontWeight: 600, color: '#6b7280', cursor: 'pointer', borderTop: '1px solid #e5e7eb' },
 }
-
 const sr = {
   row:       { borderBottom: '1px solid #f3f4f6' },
   td:        { padding: '5px 8px', verticalAlign: 'middle' },
