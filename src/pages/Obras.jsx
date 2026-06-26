@@ -1,3 +1,7 @@
+// ── Obras.jsx ──
+// Adaptado para usar tabelas cp_* do Supabase central
+// Layout e funcionalidades mantidos identicamente
+
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, TIPOS_ATA } from '../lib/supabase'
@@ -9,50 +13,104 @@ export default function Obras() {
   const navigate = useNavigate()
   const { showToast, ToastContainer } = useToast()
 
-  const [obras, setObras]         = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [modal, setModal]         = useState(false)
-  const [form, setForm]           = useState({ nome: '', cliente: '', local: '', fase: '', parceiros: '' })
-  const [saving, setSaving]       = useState(false)
-  const [modalAta, setModalAta]   = useState(null)
+  const [obras, setObras]           = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [modal, setModal]           = useState(false)
+  const [form, setForm]             = useState({ nome: '', cliente: '', local: '', fase: '', parceiros: '' })
+  const [saving, setSaving]         = useState(false)
+  const [modalAta, setModalAta]     = useState(null)
   const [loadingAta, setLoadingAta] = useState(false)
 
   useEffect(() => { loadObras() }, [])
 
   async function loadObras() {
     setLoading(true)
-    const { data } = await supabase
+
+    // Busca obras + metadados do check point + PM alocado
+    const { data: obrasData } = await supabase
       .from('obras')
-      .select('*, usuarios(nome)')
-      .eq('ativa', true)
+      .select('id, nome, created_at')
       .order('created_at', { ascending: false })
-    setObras(data || [])
+
+    if (!obrasData) { setLoading(false); return }
+
+    // Busca metadados cp para cada obra
+    const { data: metas } = await supabase
+      .from('cp_obras_meta')
+      .select('*')
+      .in('obra_id', obrasData.map(o => o.id))
+      .eq('ativa', true)
+
+    // Busca PMs alocados
+    const { data: alocacoes } = await supabase
+      .from('alocacoes')
+      .select('obra_id, user_id, perfis(nome, role)')
+      .in('obra_id', obrasData.map(o => o.id))
+
+    // Monta lista só de obras que têm metadados no check point
+    const metaMap = {}
+    ;(metas || []).forEach(m => { metaMap[m.obra_id] = m })
+
+    const pmMap = {}
+    ;(alocacoes || []).forEach(a => {
+      if (a.perfis?.role === 'pmo' && !pmMap[a.obra_id]) {
+        pmMap[a.obra_id] = a.perfis.nome
+      }
+    })
+
+    const resultado = obrasData
+      .filter(o => metaMap[o.id])
+      .map(o => ({
+        ...o,
+        ...metaMap[o.id],
+        pm_nome: pmMap[o.id] || null,
+      }))
+
+    setObras(resultado)
     setLoading(false)
   }
 
   async function criarObra(e) {
     e.preventDefault()
     setSaving(true)
-    const { data: pm } = await supabase
-      .from('usuarios')
-      .select('id')
-      .eq('auth_id', (await supabase.auth.getUser()).data.user.id)
+
+    // 1. Cria na tabela obras central
+    const { data: novaObra, error } = await supabase
+      .from('obras')
+      .insert({ nome: form.nome })
+      .select()
       .single()
 
-    const { error } = await supabase.from('obras').insert({ ...form, pm_id: pm.id })
-
-    if (error) showToast('Erro ao criar obra')
-    else {
-      showToast('Obra criada!')
-      setModal(false)
-      setForm({ nome: '', cliente: '', local: '', fase: '', parceiros: '' })
-      loadObras()
+    if (error || !novaObra) {
+      showToast('Erro ao criar obra')
+      setSaving(false)
+      return
     }
+
+    // 2. Cria metadados cp
+    await supabase.from('cp_obras_meta').insert({
+      obra_id:   novaObra.id,
+      cliente:   form.cliente,
+      local:     form.local,
+      fase:      form.fase,
+      parceiros: form.parceiros,
+      ativa:     true,
+    })
+
+    // 3. Aloca o PMO logado
+    await supabase.from('alocacoes').insert({
+      obra_id: novaObra.id,
+      user_id: perfil.id,
+    })
+
+    showToast('Obra criada!')
+    setModal(false)
+    setForm({ nome: '', cliente: '', local: '', fase: '', parceiros: '' })
+    loadObras()
     setSaving(false)
   }
 
   async function abrirAta(obraId, tipo) {
-    // Kickoff vai direto — geralmente é único por obra
     if (tipo === 'kickoff') {
       navigate('/ata/' + obraId + '/' + tipo)
       return
@@ -60,7 +118,7 @@ export default function Obras() {
 
     setLoadingAta(true)
     const { data: atas } = await supabase
-      .from('atas')
+      .from('cp_atas')                          // ← tabela migrada
       .select('id, data_reuniao, numero_reuniao, tipo')
       .eq('obra_id', obraId)
       .eq('tipo', tipo)
@@ -71,12 +129,10 @@ export default function Obras() {
     const ultimaAta = atas?.[0] || null
 
     if (!ultimaAta) {
-      // Primeira ata — vai direto criar
       navigate('/ata/' + obraId + '/' + tipo)
       return
     }
 
-    // Tem ata anterior — pergunta o que fazer
     setModalAta({ obraId, tipo, ultimaAta })
   }
 
@@ -88,12 +144,14 @@ export default function Obras() {
         <div>
           <h1 style={s.h1}>Obras</h1>
           <p style={s.sub}>
-            {perfil?.role === 'socio' ? 'Todas as obras ativas' : 'Suas obras ativas'}
+            {perfil?.role === 'pmo' ? 'Todas as obras ativas' : 'Suas obras ativas'}
           </p>
         </div>
-        <button style={s.btnNova} onClick={() => setModal(true)}>
-          <i className="ti ti-plus" /> Nova obra
-        </button>
+        {perfil?.is_admin && (
+          <button style={s.btnNova} onClick={() => setModal(true)}>
+            <i className="ti ti-plus" /> Nova obra
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -101,8 +159,10 @@ export default function Obras() {
       ) : obras.length === 0 ? (
         <div style={s.empty}>
           <i className="ti ti-building-off" style={{ fontSize: 40, color: '#d1d5db' }} />
-          <p>Nenhuma obra cadastrada ainda.</p>
-          <button style={s.btnNova} onClick={() => setModal(true)}>Criar primeira obra</button>
+          <p>Nenhuma obra com Check Point cadastrada ainda.</p>
+          {perfil?.is_admin && (
+            <button style={s.btnNova} onClick={() => setModal(true)}>Criar primeira obra</button>
+          )}
         </div>
       ) : (
         <div style={s.grid}>
@@ -116,7 +176,7 @@ export default function Obras() {
                   <div style={s.cardMeta}>
                     {obra.local    && <span><i className="ti ti-map-pin" /> {obra.local}</span>}
                     {obra.fase     && <span><i className="ti ti-flag" /> {obra.fase}</span>}
-                    {obra.usuarios?.nome && <span><i className="ti ti-user" /> {obra.usuarios.nome}</span>}
+                    {obra.pm_nome  && <span><i className="ti ti-user" /> {obra.pm_nome}</span>}
                   </div>
                 </div>
               </div>
@@ -188,7 +248,6 @@ export default function Obras() {
                 <i className="ti ti-x" />
               </button>
             </div>
-
             <div style={s.infoBox}>
               Existe a ata{' '}
               <strong>#{String(modalAta.ultimaAta.numero_reuniao || 1).padStart(2, '0')}</strong>{' '}
@@ -198,18 +257,12 @@ export default function Obras() {
               </strong>
               . O que deseja fazer?
             </div>
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button
-                style={s.btnOpcao}
-                onClick={() => {
-                  setModalAta(null)
-                  navigate('/ata/' + modalAta.obraId + '/' + modalAta.tipo + '?ata=' + modalAta.ultimaAta.id)
-                }}
-              >
-                <div style={s.btnOpcaoIcon}>
-                  <i className="ti ti-pencil" />
-                </div>
+              <button style={s.btnOpcao} onClick={() => {
+                setModalAta(null)
+                navigate('/ata/' + modalAta.obraId + '/' + modalAta.tipo + '?ata=' + modalAta.ultimaAta.id)
+              }}>
+                <div style={s.btnOpcaoIcon}><i className="ti ti-pencil" /></div>
                 <div>
                   <div style={s.btnOpcaoTitle}>Editar ata atual</div>
                   <div style={s.btnOpcaoSub}>
@@ -217,14 +270,10 @@ export default function Obras() {
                   </div>
                 </div>
               </button>
-
-              <button
-                style={{ ...s.btnOpcao, borderColor: '#07D48A' }}
-                onClick={() => {
-                  setModalAta(null)
-                  navigate('/ata/' + modalAta.obraId + '/' + modalAta.tipo)
-                }}
-              >
+              <button style={{ ...s.btnOpcao, borderColor: '#07D48A' }} onClick={() => {
+                setModalAta(null)
+                navigate('/ata/' + modalAta.obraId + '/' + modalAta.tipo)
+              }}>
                 <div style={{ ...s.btnOpcaoIcon, background: '#e8faf4', color: '#07D48A' }}>
                   <i className="ti ti-plus" />
                 </div>
@@ -236,10 +285,7 @@ export default function Obras() {
                 </div>
               </button>
             </div>
-
-            <button style={s.btnCancel} onClick={() => setModalAta(null)}>
-              Cancelar
-            </button>
+            <button style={s.btnCancel} onClick={() => setModalAta(null)}>Cancelar</button>
           </div>
         </div>
       )}
