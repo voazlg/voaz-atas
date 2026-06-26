@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../lib/supabase'
+import { supabase, STATUS } from '../lib/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { STATUS } from '../lib/supabase'
 
 const URGENCIA = ['ATRASADO', 'ALERTA', 'MONITORAMENTO', 'EM_ANDAMENTO']
 
@@ -10,34 +9,32 @@ export default function Dashboard() {
   const { perfil } = useAuth()
   const navigate = useNavigate()
 
-  const [scores, setScores]           = useState([])
-  const [pendencias, setPendencias]   = useState([])
-  const [loading, setLoading]         = useState(true)
-  const [aba, setAba]                 = useState('pendencias')
-  const [filtroObra, setFiltroObra]   = useState('todas')
-  const [filtroPM, setFiltroPM]       = useState('todos')
+  const [scores, setScores]         = useState([])
+  const [pendencias, setPendencias] = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [aba, setAba]               = useState('pendencias')
+  const [filtroObra, setFiltroObra] = useState('todas')
+  const [filtroPM, setFiltroPM]     = useState('todos')
   const [filtroStatus, setFiltroStatus] = useState('todos')
 
   useEffect(() => { load() }, [])
 
   async function load() {
     setLoading(true)
-
     const [{ data: sc }, { data: pend }] = await Promise.all([
-      supabase.from('score_obras').select('*').order('score', { ascending: true }),
-      supabase.from('pendencias').select('*').order('obra_nome'),
+      supabase.from('cp_score_obras').select('*').order('score', { ascending: true }),
+      supabase.from('cp_pendencias').select('*').order('obra_nome'),
     ])
-
     setScores(sc || [])
     setPendencias(pend || [])
     setLoading(false)
   }
 
-  const obras      = scores
-  const pmsUnicos  = [...new Map(scores.map(s => [s.pm_id, { id: s.pm_id, nome: s.pm_nome }])).values()]
-  const isSocio    = perfil?.role === 'socio'
+  // No central, PMO = sócio
+  const isSocio = perfil?.role === 'pmo'
 
-  // ── FILTROS ──
+  const pmsUnicos = [...new Map(scores.map(s => [s.pm_id, { id: s.pm_id, nome: s.pm_nome }])).values()]
+
   const pendFiltradas = pendencias.filter(p => {
     if (filtroObra !== 'todas' && p.obra_id !== filtroObra) return false
     if (filtroPM !== 'todos' && p.pm_id !== filtroPM) return false
@@ -54,13 +51,11 @@ export default function Dashboard() {
     o.itens.sort((a, b) => URGENCIA.indexOf(a.status) - URGENCIA.indexOf(b.status))
   })
 
-  // ── TOTAIS ──
   const totalAtras  = pendencias.filter(p => p.status === 'ATRASADO').length
   const totalAlerta = pendencias.filter(p => p.status === 'ALERTA').length
   const scoreGeral  = scores.length ? Math.round(scores.reduce((s, o) => s + Number(o.score), 0) / scores.length) : 100
   const corScore    = scoreGeral >= 70 ? '#07D48A' : scoreGeral >= 40 ? '#f59e0b' : '#ef4444'
 
-  // ── CARGA POR PM ──
   const cargaPM = pmsUnicos.map(pm => {
     const obrasPM = scores.filter(s => s.pm_id === pm.id)
     const pendPM  = pendencias.filter(p => p.pm_id === pm.id)
@@ -76,20 +71,12 @@ export default function Dashboard() {
     }
   }).sort((a, b) => a.score - b.score)
 
-  function corSaude(status) {
-    return status === 'verde' ? '#07D48A' : status === 'amarelo' ? '#f59e0b' : '#ef4444'
-  }
-  function bgSaude(status) {
-    return status === 'verde' ? '#d1fae5' : status === 'amarelo' ? '#fef3c7' : '#fee2e2'
-  }
-  function labelSaude(status) {
-    return status === 'verde' ? 'Saudável' : status === 'amarelo' ? 'Atenção' : 'Crítico'
-  }
+  function corSaude(status)   { return status === 'saudavel' ? '#07D48A' : status === 'atencao' ? '#f59e0b' : '#ef4444' }
+  function bgSaude(status)    { return status === 'saudavel' ? '#d1fae5' : status === 'atencao' ? '#fef3c7' : '#fee2e2' }
+  function labelSaude(status) { return status === 'saudavel' ? 'Saudável' : status === 'atencao' ? 'Atenção' : 'Crítico' }
 
   return (
     <div style={s.page}>
-
-      {/* ── HEADER ── */}
       <div style={s.topBar}>
         <div>
           <h1 style={s.h1}>Dashboard</h1>
@@ -100,7 +87,6 @@ export default function Dashboard() {
         </button>
       </div>
 
-      {/* ── CARDS RESUMO ── */}
       <div style={s.resumoRow}>
         <div style={s.resumoCard}>
           <div style={{ fontSize: 28, fontWeight: 800, color: corScore }}>{scoreGeral}</div>
@@ -120,10 +106,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── ABAS ── */}
       <div style={s.tabs}>
         {[
-          { key: 'pendencias', label: 'Pendências', icon: 'ti-list' },
+          { key: 'pendencias', label: 'Pendências',      icon: 'ti-list' },
           { key: 'saude',      label: 'Saúde das obras', icon: 'ti-heart-rate-monitor' },
           ...(isSocio ? [{ key: 'carga', label: 'Carga por PM', icon: 'ti-users' }] : []),
         ].map(t => (
@@ -135,10 +120,9 @@ export default function Dashboard() {
 
       {loading ? <p style={{ padding: 24, color: '#6b7280' }}>Carregando...</p> : (
         <>
-          {/* ══ ABA: PENDÊNCIAS ══ */}
+          {/* ══ PENDÊNCIAS ══ */}
           {aba === 'pendencias' && (
             <div style={s.section}>
-              {/* Filtros */}
               <div style={s.filtrosBar}>
                 <select style={s.filterSel} value={filtroObra} onChange={e => setFiltroObra(e.target.value)}>
                   <option value="todas">Todas as obras</option>
@@ -175,7 +159,7 @@ export default function Dashboard() {
                           {isSocio && <span style={s.obraPM}><i className="ti ti-user" /> {obra.pm}</span>}
                         </div>
                         <div style={s.obraStats}>
-                          {['ATRASADO','ALERTA'].map(st => {
+                          {['ATRASADO', 'ALERTA'].map(st => {
                             const cnt = obra.itens.filter(i => i.status === st).length
                             if (!cnt) return null
                             return <span key={st} style={{ ...s.statPill, background: STATUS[st].color, color: STATUS[st].text }}>{cnt} {STATUS[st].label}</span>
@@ -216,7 +200,7 @@ export default function Dashboard() {
                                 </td>
                                 <td style={{ ...s.td, color: '#6b7280', fontSize: 12 }}>{ultimaObs || '—'}</td>
                                 <td style={s.td}>
-                                  <span className={`badge badge-${item.status}`}>{stCfg?.label}</span>
+                                  <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 12, background: stCfg?.color, color: stCfg?.text }}>{stCfg?.label}</span>
                                 </td>
                               </tr>
                             )
@@ -230,7 +214,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ══ ABA: SAÚDE DAS OBRAS ══ */}
+          {/* ══ SAÚDE ══ */}
           {aba === 'saude' && (
             <div style={s.section}>
               <div style={s.saudeGrid}>
@@ -247,21 +231,15 @@ export default function Dashboard() {
                         <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>score</div>
                       </div>
                     </div>
-
-                    {/* Barra de saúde */}
                     <div style={{ height: 6, background: '#f3f4f6', borderRadius: 3, marginBottom: 12, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${o.score}%`, background: corSaude(o.status_saude), borderRadius: 3, transition: 'width .5s ease' }} />
+                      <div style={{ height: '100%', width: `${Math.max(0, o.score)}%`, background: corSaude(o.status_saude), borderRadius: 3 }} />
                     </div>
-
-                    {/* Badge status */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                       <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: bgSaude(o.status_saude), color: corSaude(o.status_saude) }}>
                         {labelSaude(o.status_saude)}
                       </span>
                       <span style={{ fontSize: 12, color: '#6b7280' }}>{o.total} itens total</span>
                     </div>
-
-                    {/* Breakdown */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
                       {[
                         { label: 'Atrasados',    val: o.atrasados,    bg: '#fee2e2', color: '#991b1b' },
@@ -275,7 +253,6 @@ export default function Dashboard() {
                         </div>
                       ))}
                     </div>
-
                     <button style={s.btnIrAtaSaude} onClick={() => navigate(`/ata/${o.obra_id}/interno`)}>
                       Abrir ata <i className="ti ti-arrow-right" />
                     </button>
@@ -285,7 +262,7 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* ══ ABA: CARGA POR PM ══ */}
+          {/* ══ CARGA POR PM ══ */}
           {aba === 'carga' && isSocio && (
             <div style={s.section}>
               <div style={s.cargaGrid}>
@@ -302,27 +279,21 @@ export default function Dashboard() {
                         <div style={{ fontSize: 10, color: '#6b7280' }}>score</div>
                       </div>
                     </div>
-
                     <div style={{ height: 4, background: '#f3f4f6', borderRadius: 2, margin: '12px 0', overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${pm.score}%`, background: pm.score >= 70 ? '#07D48A' : pm.score >= 40 ? '#f59e0b' : '#ef4444', borderRadius: 2 }} />
                     </div>
-
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                      <div style={{ textAlign: 'center', padding: '8px 4px', background: '#f9fafb', borderRadius: 8 }}>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: '#2e2e2e' }}>{pm.obras}</div>
-                        <div style={{ fontSize: 11, color: '#6b7280' }}>obras</div>
-                      </div>
-                      <div style={{ textAlign: 'center', padding: '8px 4px', background: '#fee2e2', borderRadius: 8 }}>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: '#dc2626' }}>{pm.atrasados}</div>
-                        <div style={{ fontSize: 11, color: '#dc2626' }}>atrasados</div>
-                      </div>
-                      <div style={{ textAlign: 'center', padding: '8px 4px', background: '#dbeafe', borderRadius: 8 }}>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: '#1e40af' }}>{pm.pendentes}</div>
-                        <div style={{ fontSize: 11, color: '#1e40af' }}>pendentes</div>
-                      </div>
+                      {[
+                        { val: pm.obras,     label: 'obras',     bg: '#f9fafb', color: '#2e2e2e' },
+                        { val: pm.atrasados, label: 'atrasados', bg: '#fee2e2', color: '#dc2626' },
+                        { val: pm.pendentes, label: 'pendentes', bg: '#dbeafe', color: '#1e40af' },
+                      ].map(item => (
+                        <div key={item.label} style={{ textAlign: 'center', padding: '8px 4px', background: item.bg, borderRadius: 8 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: item.color }}>{item.val}</div>
+                          <div style={{ fontSize: 11, color: item.color }}>{item.label}</div>
+                        </div>
+                      ))}
                     </div>
-
-                    {/* Obras deste PM */}
                     <div style={{ marginTop: 12 }}>
                       {scores.filter(o => o.pm_id === pm.id).map(o => (
                         <div key={o.obra_id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid #f3f4f6' }}>
@@ -332,9 +303,7 @@ export default function Dashboard() {
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontSize: 13, fontWeight: 800, color: corSaude(o.status_saude) }}>{o.score}</span>
-                            <button style={{ ...s.btnIrAta, padding: '4px 10px', fontSize: 11 }} onClick={() => navigate(`/ata/${o.obra_id}/interno`)}>
-                              Ver
-                            </button>
+                            <button style={{ ...s.btnIrAta, padding: '4px 10px', fontSize: 11 }} onClick={() => navigate(`/ata/${o.obra_id}/interno`)}>Ver</button>
                           </div>
                         </div>
                       ))}
