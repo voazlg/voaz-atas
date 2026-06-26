@@ -44,14 +44,7 @@ export function Header() {
         >
           <i className="ti ti-layout-dashboard" /> Dashboard
         </button>
-        {perfil?.is_admin && (
-          <button
-            style={{ ...s.navBtn, ...(location.pathname === '/usuarios' ? s.navActive : {}) }}
-            onClick={() => navigate('/usuarios')}
-          >
-            <i className="ti ti-users-cog" /> Usuários
-          </button>
-        )}
+       
       </nav>
 
       <div style={s.right}>
